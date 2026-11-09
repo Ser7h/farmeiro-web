@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Vistoria 3D · Farmeiro</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: #f2efd9;
+        background: #29382a;
+        font:
+          15px/1.35 system-ui,
+          sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100dvh;
+        touch-action: none;
+        cursor: grab;
+      }
+      canvas:active {
+        cursor: grabbing;
+      }
+      .bar,
+      .info {
+        position: fixed;
+        left: 16px;
+        right: 16px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        pointer-events: none;
+      }
+      .bar {
+        top: 16px;
+      }
+      .info {
+        bottom: 16px;
+        align-items: flex-end;
+      }
+      .panel {
+        border: 1px solid #52654d;
+        border-radius: 8px;
+        background: #203421f5;
+        padding: 9px 13px;
+        box-shadow: 0 3px 14px #15211440;
+        pointer-events: auto;
+      }
+      a,
+      button,
+      select {
+        font: inherit;
+        color: inherit;
+      }
+      a {
+        text-decoration: none;
+      }
+      button,
+      select {
+        background: #2c452b;
+        border: 1px solid #6f7e61;
+        border-radius: 4px;
+        padding: 0.35em 0.7em;
+        cursor: pointer;
+      }
+      a:focus-visible,
+      button:focus-visible,
+      select:focus-visible,
+      canvas:focus-visible {
+        outline: 3px solid #f4c166;
+        outline-offset: 2px;
+      }
+      button:hover,
+      select:hover {
+        background: #3c5538;
+      }
+      .tools {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      #selected {
+        font-weight: 650;
+        display: block;
+      }
+      .hint {
+        font-size: 12px;
+        color: #c6cfb9;
+        margin-top: 3px;
+      }
+      #msg {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        max-width: min(480px, 90vw);
+        text-align: center;
+      }
+      #msg:empty {
+        display: none;
+      }
+      @media (max-width: 660px) {
+        .bar,
+        .info {
+          left: 8px;
+          right: 8px;
+        }
+        .bar {
+          top: 8px;
+        }
+        .info {
+          bottom: 8px;
+          gap: 4px;
+        }
+        .panel {
+          padding: 6px 8px;
+        }
+        .hint {
+          max-width: 50vw;
+        }
+        .tools {
+          gap: 3px;
+        }
+        button,
+        select {
+          font-size: 13px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas
+      id="map"
+      tabindex="0"
+      aria-label="Terras de Cascavel em três dimensões. Use as setas para girar a câmera, mais e menos para aproximar ou afastar."
+    ></canvas>
+    <div class="bar">
+      <a class="panel" id="back" href="../jogar/">Farmeiro · Voltar ao jogo</a>
+      <label class="panel"
+        ><select id="place" aria-label="Posição da câmera">
+          <option value="regiao">Região de Cascavel</option>
+          <option value="helena">Santa Helena</option>
+          <option value="vista">Boa Vista</option>
+          <option value="clara">Água Clara</option>
+        </select></label
+      >
+    </div>
+    <div class="info">
+      <div class="panel" aria-live="polite">
+        <span id="selected">Vistoria da região</span>
+        <div class="hint">Arraste para girar. Clique num talhão para selecioná-lo.</div>
+      </div>
+      <div class="panel tools">
+        <button id="out" title="Afastar">−</button><button id="in" title="Aproximar">+</button
+        ><button id="reset">Recentrar</button>
+      </div>
+    </div>
+    <div class="panel" id="msg" role="status">Abrindo o modelo da região…</div>
+    <script src="vistoria.js"></script>
+  </body>
+</html>

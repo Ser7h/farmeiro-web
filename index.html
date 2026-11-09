@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#243e31" />
+    <title>Farmeiro | Primeira safra</title>
+    <link rel="icon" href="./assets/marca.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./conta.css" />
+    <style>
+      #entry-title { overflow-wrap: anywhere; }
+    </style>
+    <script src="./perfil.js" defer></script>
+    <script src="./entrada.js" defer></script>
+  </head>
+  <body>
+    <main class="entry">
+      <div class="landscape">
+        <img class="region" src="./assets/mapa.webp" alt="Mapa das propriedades rurais na região de Cascavel" />
+        <div class="brand"><img src="./assets/marca.svg" alt="" /> Farmeiro</div>
+        <div class="map-caption">
+          <p>Cascavel, Paraná</p>
+          <h1>Primeira safra</h1>
+        </div>
+      </div>
+      <section class="entry-form" aria-labelledby="entry-title">
+        <div class="inner">
+          <h2 id="entry-title">Entre na fazenda</h2>
+          <p id="local-save">Sua safra fica salva neste navegador. Para levá-la a outro aparelho, exporte uma cópia no menu Partida.</p>
+          <form id="profile-form" hidden>
+            <label for="nickname">Seu apelido</label>
+            <input id="nickname" name="nickname" autocomplete="nickname" required minlength="2" maxlength="24"
+              spellcheck="false" aria-describedby="nick-help form-error" />
+            <small id="nick-help">Use de 2 a 24 caracteres.</small>
+            <button type="submit" class="primary">Começar a jogar</button>
+          </form>
+          <a id="resume" class="primary" href="./jogar/" hidden>Continuar safra</a>
+          <p id="form-error" class="error" role="alert"></p>
+          <noscript>Ative o JavaScript do navegador para jogar.</noscript>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <base href="../" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#223d32" />
+    <title>Farmeiro | Primeira safra</title>
+    <link rel="icon" href="assets/marca.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header id="top"></header>
+    <div id="shell">
+      <nav id="rail" aria-label="Navegação da fazenda"></nav>
+      <main>
+        <div id="heading"></div>
+        <div id="layout">
+          <section id="territory" aria-label="Mapa estratégico">
+            <div id="map">
+              <div id="viewport">
+                <div id="world">
+                  <img
+                    id="terrain"
+                    src="assets/mapa.webp"
+                    alt="Vista aérea da região agrícola, com talhões, estradas, sedes e reservatórios"
+                    draggable="false"
+                  />
+                  <canvas id="crops" aria-hidden="true"></canvas>
+                  <div id="pins"></div>
+                </div>
+              </div>
+              <div id="map-caption"></div>
+              <div id="weather"></div>
+              <div id="cartography"></div>
+              <div id="map-tools"></div>
+            </div>
+            <div id="below"></div>
+          </section>
+          <div id="field-desk">
+            <aside id="notebook" aria-label="Caderno de campo"></aside>
+            <section id="home-stories" aria-label="Desafios da safra" hidden></section>
+          </div>
+        </div>
+      </main>
+    </div>
+    <dialog id="dialog"><div id="dialog-content"></div></dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <noscript>Ative o JavaScript para jogar a primeira safra.</noscript>
+    <script src="icons.js"></script>
+    <script src="dados/clima/series.js"></script>
+    <script src="clima-regional.js"></script>
+    <script src="mercado.js"></script>
+    <script src="engine.js"></script>
+    <script src="desafios/r01.js"></script>
+    <script src="geometry.js"></script>
+    <script src="perfil.js" data-perfil-local></script>
+    <script src="game.js"></script>
+    <script src="panels.js"></script>
+    <script src="operacao.js"></script>
+    <script src="actions.js"></script>
+  </body>
+</html>
