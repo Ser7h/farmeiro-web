@@ -1,0 +1,4 @@
+# Os hashes publicados identificam os bytes originais das respostas da API.
+dados/clima/*.json -text
+dados/fenologia/*.json -text
+assets/vendor/** -text -whitespace

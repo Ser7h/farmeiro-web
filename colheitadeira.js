@@ -26,6 +26,7 @@
         </div>
         <div class="cab-vista">
           <canvas class="cab-campo" aria-label="Vista pela cabine da colheitadeira"></canvas>
+          <canvas class="cab-campo-3d" hidden aria-label="Vista tridimensional pela cabine da colheitadeira"></canvas>
           <div class="cab-infos"><strong data-led="tarefa"></strong><span class="cab-aviso" data-led="aviso" role="status"></span></div>
           <div class="cab-guia" aria-label="Mapa do talhão, colheitadeira e carreta"><span>Mapa do talhão</span><canvas aria-hidden="true"></canvas><span data-led="posicao"></span></div>
         </div>
@@ -76,6 +77,7 @@
     const botoes = Object.fromEntries([...dialog.querySelectorAll("[data-op]")].map((el) => [el.dataset.op, el]));
     $("#cab-titulo").textContent = [opcoes.nome, opcoes.cultura].filter(Boolean).join(" · ") || "Talhão";
     const canvas = $(".cab-campo");
+    const canvas3D = $(".cab-campo-3d");
     const mapa = $(".cab-guia canvas");
     const ctx = canvas.getContext("2d", { alpha: false });
     const mapaCtx = mapa.getContext("2d");
@@ -86,7 +88,47 @@
     const toques = new Map();
     let alvo = 0, encerrada = false, ultimaPosicaoSalva = 0;
     let quadro, anterior = 0, ultimoPainel = 0, largura = 0, altura = 0;
-    const render = criarVista(ctx, n, passadas, opcoes.cultura);
+    const render2D = criarVista(ctx, n, passadas, opcoes.cultura);
+    let vista3D, contexto3D;
+    dialog.dataset.vista = "2d";
+
+    function usarVistaSimples() {
+      const cena = vista3D;
+      vista3D = null;
+      canvas3D.hidden = true;
+      dialog.dataset.vista = "2d";
+      try { cena?.fechar(); }
+      finally {
+        if (contexto3D && !contexto3D.isContextLost()) contexto3D.getExtension("WEBGL_lose_context")?.loseContext();
+        contexto3D = null;
+      }
+    }
+    async function carregarVista3D() {
+      if (location.protocol === "file:" || !window.WebGL2RenderingContext ||
+          !window.HTMLScriptElement?.supports?.("importmap")) return;
+      try {
+        contexto3D = canvas3D.getContext("webgl2", { alpha: false, antialias: true, powerPreference: "high-performance" });
+        if (!contexto3D) return;
+        dialog.dataset.vista = "carregando";
+        const { criarVista3D } = await import("farmeiro/cabine");
+        if (encerrada || !contexto3D || contexto3D.isContextLost()) return;
+        const cena = await criarVista3D(canvas3D, {
+          faixas: n, cultura: opcoes.cultura, passadas, posicaoCarreta,
+          contexto: contexto3D, signal: eventos.signal,
+        });
+        if (encerrada || !contexto3D || contexto3D.isContextLost()) { cena.fechar(); return; }
+        vista3D = cena;
+        vista3D.desenhar(maquina, largura, altura, alvo, estado.trailer);
+        canvas3D.hidden = false;
+        dialog.dataset.vista = "3d";
+      } catch (erro) {
+        if (!encerrada) {
+          console.warn("A colheita continua na vista simplificada.", erro);
+          usarVistaSimples();
+        }
+      }
+    }
+    listen(canvas3D, "webglcontextlost", usarVistaSimples);
     const chavePosicao = "farmeiro.posicao-cabine." + (opcoes.chave || opcoes.nome);
     const ladoAtual = () => maquina.z <= metrosCabeceira ? "sul" : maquina.z >= comprimento - metrosCabeceira ? "norte" : null;
     const cheio = () => estado.loadSc >= estado.capacitySc - 0.0001;
@@ -272,7 +314,11 @@
       const dt = anterior ? Math.min((agora - anterior) / 1000, 0.12) : 0;
       anterior = agora;
       simular(dt);
-      render(maquina, largura, altura, alvo, estado.trailer);
+      if (vista3D) {
+        try { vista3D.desenhar(maquina, largura, altura, alvo, estado.trailer); }
+        catch (erro) { console.warn("A vista da cabine passou para 2D.", erro); usarVistaSimples(); }
+      }
+      if (!vista3D) render2D(maquina, largura, altura, alvo, estado.trailer);
       if (!parada && agora - ultimaPosicaoSalva > 900) { guardarPosicao(); ultimaPosicaoSalva = agora; }
       if (agora - ultimoPainel > 140) { atualizarPainel(); ultimoPainel = agora; }
       quadro = requestAnimationFrame(animar);
@@ -283,6 +329,7 @@
       encerrada = true;
       cancelAnimationFrame(quadro);
       eventos.abort();
+      usarVistaSimples();
       resize.disconnect();
       dialog.close();
       dialog.remove();
@@ -339,6 +386,7 @@
     dimensionar();
     fecharAtual = fechar;
     quadro = requestAnimationFrame(animar);
+    carregarVista3D();
     return { fechar };
   }
 
