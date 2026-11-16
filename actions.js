@@ -7,7 +7,7 @@ function guidePanel() {
 <div class="mini-card"><h4>Conheça a terra</h4><p>Selecione uma sede no mapa. Compare a fala do vendedor com a visita independente e, se fizer sentido, encomende o laudo. A aba Proposta mostra o que sobra no caixa.</p></div>
 <div class="mini-card"><h4>Planeje antes de semear</h4><p>Escolha pelo menos um talhão, área, cultura, ciclo e quantidade de insumos. A patrulha contratada só começa em 9 de outubro; o conjunto próprio trabalha mais cedo e cria outra dívida.</p></div>
 <div class="mini-card"><h4>Leia o calendário</h4><p>O relógio para entre as decisões. Aproxime o mapa com + e arraste para percorrer a propriedade. Toque no raio para ler o boletim. A equipe pode esperar o solo firmar ou entrar em condição marginal. Essa escolha muda a data de semeadura e o estado do solo.</p></div>
-<div class="mini-card"><h4>Colha, venda e acerte as contas</h4><p>Quando o talhão amadurecer, assuma a cabine ou mande a equipe colher. Na cabine, chame a carreta enquanto corta a lavoura e escolha a cabeceira norte ou sul. Pare junto a ela e descarregue para liberar as sacas para venda. Compare prazo e frete e acompanhe o restante no depósito. Cada noite de espera no depósito custa tarifa e pode reduzir a quantidade disponível.</p></div>
+<div class="mini-card"><h4>Colha, entregue e venda</h4><p>Chame a carreta pelo rádio enquanto colhe. Pare ao lado dela na cabeceira e transfira o grão. Entre no trator e leve a carreta ao silo. Quando parar sobre a moega, descarregue para liberar as sacas para venda. Compare preço, prazo e frete antes de vender. A guarda no silo começa após a entrega.</p></div>
 ${storyShelf()}<h3>Missão da Grota</h3><p>Comece no dia do alerta, com milho em florescimento na Grota, milho vegetativo no Alto e 1.000 m³ para um turno. Sua campanha fica guardada enquanto você compara decisões.</p><div class="row">${btn("mission-review", "Abrir missão climática", "bolt", "primary")}${btn("technical", "Ficha do cenário", "file", "secondary")}${btn("audio", sound ? "Desligar ambiente" : "Ouvir ambiente", sound ? "mute" : "sound", "text-btn")}</div>`,
   );
 }
@@ -303,10 +303,10 @@ function dispatch(action, id = "") {
       done("start", {}, "Implantação reservada. O calendário da lavoura está ativo.");
       break;
     case "next-map": {
-      const ready = s.plots.find((p) => (p.phase === "Maduro" && !p.harvested) || p.combine?.loadSc > 0 || p.stocks > 0);
+      const ready = s.plots.find(hasTransport) || s.plots.find(p => hasFieldOperation(p) || p.stocks > 0);
       if (ready) {
         jumpPlot(ready.id);
-        if ((ready.phase === "Maduro" && !ready.harvested) || ready.combine?.loadSc > 0) harvestPanel(ready.id);
+        if (hasFieldOperation(ready)) harvestPanel(ready.id);
         else salePanel(ready.id);
         break;
       }
@@ -618,9 +618,10 @@ function startGame() {
   if (saveError) notify(saveError);
   render();
   mapSize();
-  if (location.hash === "#colheita") {
+  if (["#colheita", "#silo"].includes(location.hash)) {
+    const scenario = location.hash.slice(1);
     history.replaceState(null, "", location.pathname + location.search);
-    storyReview("colheita");
+    storyReview(scenario);
   }
 }
 if (hostedGame) {
@@ -637,6 +638,6 @@ if (hostedGame) {
 } else if (pagesGame && !pagesProfile) {
   $("shell").hidden = true;
   const entry = new URL("./", document.baseURI);
-  if (location.hash === "#colheita") entry.hash = "colheita";
+  if (["#colheita", "#silo"].includes(location.hash)) entry.hash = location.hash;
   location.replace(entry);
 } else startGame();

@@ -23,6 +23,8 @@ function loadingPanel(requestedId) {
     ? `${kv("Ponto instalado", esc(location.name))}${kv("Capacidade livre hoje", sacks(FarmMarket.loadingRemaining(s)) + " de " + sacks(terms.capacity))}${kv("Economia no frete de " + esc(selected.name), brl(discount) + "/sc")}`
     : `${kv("Montagem para esta safra", brl(terms.cost))}${kv("Economia no talhão do ponto", brl(terms.nearDiscount) + "/sc")}${kv("Economia no outro talhão", brl(terms.farDiscount) + "/sc")}<p>Os dois talhões dividem ${sacks(terms.capacity)} de carga por dia. O restante segue pelo frete direto.</p>${open ? btn("montar-ponto", "Montar no " + esc(selected.name) + " · " + brl(terms.cost), "truck", "primary", selected.id) : ""}`;
   const lot = selected.stocks > 0 ? btn("sale", "Vender o lote do " + esc(selected.name), "truck", "secondary", selected.id) : "";
+  const hauling = hasTransport(selected) ? btn("cabine", transportAction(selected), "tractor", "secondary", selected.id) : "";
+  const inTrailer = selected.combine?.trailer?.loadSc;
   openModal("escoamento", "Escoamento da safra",
-    `${map}<p class="intro">Talhão ${esc(selected.name)} · ${sacks(selected.stocks)} em estoque</p>${plan}${stock > 0 ? kv("Estoque total da fazenda", sacks(stock)) : ""}<div class="row">${lot}</div><p class="footnote">Tarifas e capacidades simuladas do cenário.</p>`);
+    `${map}<p class="intro">Talhão ${esc(selected.name)} · ${sacks(selected.stocks)} no silo</p>${inTrailer > 0 ? kv("Em trânsito na carreta", sacks(inTrailer)) : ""}${plan}${stock > 0 ? kv("Estoque total da fazenda", sacks(stock)) : ""}<div class="row">${hauling}${lot}</div><p class="footnote">Tarifas e capacidades simuladas do cenário.</p>`);
 }

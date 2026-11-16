@@ -285,9 +285,10 @@
         millisacks(plot.production) ===
           millisacks(plot.stocks) +
             millisacks(plot.combine?.loadSc ?? 0) +
+            millisacks(plot.combine?.trailer?.loadSc ?? 0) +
             sold.reduce((sum, sale) => sum + millisacks(sale.units), 0) +
             (account?.lossMillisacks || 0),
-        "A produção do talhão não concilia com o graneleiro, o estoque, as vendas e a quebra física.",
+        "A produção do talhão não concilia com o graneleiro, a carreta, o estoque, as vendas e a quebra física.",
       );
       requireThat(
         sold.reduce((sum, sale) => sum + cents(sale.storageFee), 0) === (account?.retainedCents || 0),

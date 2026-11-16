@@ -6,8 +6,14 @@
     colheita: {
       name: "Dirigir a colheitadeira",
       location: "Alto da Santa Helena",
-      text: "A soja amadureceu. Baixe a plataforma e comece a colher. Pelo rádio, mande a carreta esperar na cabeceira norte ou sul. Quando o graneleiro encher, dirija até ela e pare para descarregar.",
+      text: "A soja amadureceu. Colha uma faixa e chame a carreta pelo rádio. Passe o grão para ela na cabeceira, assuma o trator e leve a carga até a moega do silo.",
       icon: "tractor",
+    },
+    silo: {
+      name: "Levar a carreta ao silo",
+      location: "Cabeceira sul da Santa Helena",
+      text: "A primeira passada já está na carreta, ao lado da colheitadeira. Entre no trator, siga pela estrada e pare sobre a moega para entregar a soja. Depois você pode voltar à lavoura.",
+      icon: "truck",
     },
     passagem: {
       name: "A máquina entra?",
@@ -51,6 +57,13 @@
       }
       if (plot.phase === "Maduro" && !plot.harvested) {
         if (key === "colheita") return F.challenge(state);
+        if (key === "silo") {
+          go("cutCell", { id: plotId, row: 0, cell: 0, endCell: 31 });
+          go("callTrailer", { id: plotId, side: "sul", now: 0 });
+          const arrival = state.plots.find(p => p.id === plotId).combine.trailer.readyAt;
+          go("unloadTrailer", { id: plotId, side: "sul", speedKmh: 0, x: -21.5, now: arrival });
+          return F.challenge(state);
+        }
         go("harvest", { id: plotId });
         if (!pass) point = state.checkpoints.length;
         go("sell", { id: plotId, terms: "spot" });

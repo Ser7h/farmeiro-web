@@ -21,25 +21,29 @@
     dialog.innerHTML = `
       <div class="cab-estrutura">
         <div class="cab-topo">
-          <div class="cab-identidade"><small>Colheitadeira</small><h2 id="cab-titulo"></h2></div>
-          <button type="button" class="cab-saida" data-op="sair">Sair da cabine</button>
+          <div class="cab-identidade"><small data-led="veiculo">Colheitadeira</small><h2 id="cab-titulo"></h2></div>
+          <button type="button" class="cab-saida" data-op="sair">Voltar ao mapa</button>
         </div>
         <div class="cab-vista">
           <canvas class="cab-campo" aria-label="Vista pela cabine da colheitadeira"></canvas>
           <canvas class="cab-campo-3d" hidden aria-label="Vista tridimensional pela cabine da colheitadeira"></canvas>
           <div class="cab-infos"><strong data-led="tarefa"></strong><span class="cab-aviso" data-led="aviso" role="status"></span></div>
-          <div class="cab-guia" aria-label="Mapa do talhão, colheitadeira e carreta"><span>Mapa do talhão</span><canvas aria-hidden="true"></canvas><span data-led="posicao"></span></div>
+          <div class="cab-guia" aria-label="Mapa do talhão, colheitadeira, carreta e silo"><span data-led="titulo-mapa">Mapa do talhão</span><canvas aria-hidden="true"></canvas><span data-led="posicao"></span></div>
         </div>
         <div class="cab-painel">
           <div class="cab-instrumentos">
             <div><small>Velocidade</small><b data-led="velocidade">0 km/h</b></div>
             <div><small>Área colhida</small><b data-led="area"></b></div>
             <div class="cab-graneleiro"><small>Graneleiro</small><b data-led="graneleiro"></b><progress data-led="nivel" aria-label="Ocupação do graneleiro"></progress></div>
-            <div><small>Estoque entregue</small><b data-led="estoque"></b></div>
+            <div><small>Na carreta</small><b data-led="carga-carreta"></b></div>
+            <div><small>Estoque no silo</small><b data-led="estoque"></b></div>
           </div>
           <div class="cab-acoes">
             <button type="button" data-op="plataforma" aria-pressed="false">Baixar plataforma</button>
             <button type="button" data-op="alinhar">Alinhar na cabeceira</button>
+            <button type="button" data-op="entrar-trator">Entrar no trator</button>
+            <button type="button" data-op="descarregar-silo" hidden>Descarregar no silo</button>
+            <button type="button" data-op="entrar-colheitadeira" hidden>Entrar na colheitadeira</button>
           </div>
           <div class="cab-pedais" aria-label="Direção e pedais">
             <button type="button" data-move="esq" aria-label="Virar à esquerda">←</button>
@@ -48,14 +52,14 @@
             <button type="button" data-move="gas">Acelerar</button>
           </div>
           <div class="cab-radio" role="group" aria-label="Rádio da carreta">
-            <div class="cab-radio-info"><small>Rádio da carreta</small><b data-led="carreta" aria-live="off"></b></div>
+            <div class="cab-radio-info"><small data-led="radio-label">Rádio da carreta</small><b data-led="carreta" aria-live="off"></b><b data-led="trajeto" hidden></b></div>
             <div class="cab-chamada">
               <button type="button" data-op="chamar-norte">Chamar no norte</button>
               <button type="button" data-op="chamar-sul">Chamar no sul</button>
               <button type="button" data-op="descarregar">Descarregar</button>
             </div>
           </div>
-          <div class="cab-teclas">W/S ou ↑/↓ aceleram e freiam · A/D ou ←/→ dirigem · Espaço move a plataforma · 1 chama no norte · 2 chama no sul · U descarrega.</div>
+          <div class="cab-teclas" data-led="teclas">W/S ou ↑/↓ aceleram e freiam · A/D ou ←/→ dirigem · Espaço move a plataforma · 1/2 chama a carreta · U descarrega · E troca de veículo.</div>
         </div>
       </div>`;
     document.body.append(dialog);
@@ -71,6 +75,7 @@
     const passadas = Array.from({ length: n }, () => new Uint8Array(trechosPorFaixa));
     const contagens = new Array(n).fill(0);
     const maquina = { x: 0, z: -7, rumo: 0, velocidade: 0, plataforma: false, fase: 0, volante: 0, descargaAte: 0, ultimaCarga: 0 };
+    const trator = { distancia: 0, lateral: 0, velocidade: 0, voltar: false, descargaAte: 0, ultimaCarga: 0, rota: null, pose: null };
     const dialog = painel();
     const $ = (selector) => dialog.querySelector(selector);
     const leds = Object.fromEntries([...dialog.querySelectorAll("[data-led]")].map((el) => [el.dataset.led, el]));
@@ -118,7 +123,7 @@
         });
         if (encerrada || !contexto3D || contexto3D.isContextLost()) { cena.fechar(); return; }
         vista3D = cena;
-        vista3D.desenhar(maquina, largura, altura, alvo, estado.trailer);
+        vista3D.desenhar(maquina, largura, altura, alvo, estado.trailer, dirigindo() ? trator : null);
         canvas3D.hidden = false;
         dialog.dataset.vista = "3d";
       } catch (erro) {
@@ -133,6 +138,17 @@
     const ladoAtual = () => maquina.z <= metrosCabeceira ? "sul" : maquina.z >= comprimento - metrosCabeceira ? "norte" : null;
     const cheio = () => estado.loadSc >= estado.capacitySc - 0.0001;
     const completo = () => estado.encerrado || contagens.every((valor) => valor === trechosPorFaixa);
+    const dirigindo = () => Boolean(estado.trailer?.driving);
+    const cargaCarreta = () => estado.trailer?.loadSc || 0;
+    function carregarViagem() {
+      const t = estado.trailer;
+      if (!dirigindo() || !t.trip) return;
+      trator.rota = window.Farm.tractorRoute(t.side, t.trip.startX);
+      trator.distancia = t.trip.distance;
+      trator.lateral = t.trip.lateral;
+      trator.voltar = Boolean(t.trip.returning);
+      trator.pose = localizarTrator(trator);
+    }
     function sincronizar(novoEstado) {
       estado = novoEstado;
       for (let i = 0; i < n; i++) {
@@ -141,6 +157,7 @@
       }
     }
     sincronizar(estado);
+    carregarViagem();
     const assinaturaPosicao = () => [estado.cutAreaHa, estado.loadSc, estado.trailer?.readyAt].join("/");
     function guardarPosicao() {
       if (!estado.cutAreaHa && !estado.loadSc && !estado.trailer) return;
@@ -148,6 +165,7 @@
       try { localStorage.setItem(chavePosicao, JSON.stringify({ x, z, rumo, alvo, safra: assinaturaPosicao() })); } catch {}
     }
     function restaurarPosicao() {
+      if (opcoes.inicioDoCenario) return false;
       if (!estado.cutAreaHa && !estado.loadSc && !estado.trailer) return false;
       try {
         const p = JSON.parse(localStorage.getItem(chavePosicao));
@@ -167,6 +185,7 @@
       toques.clear();
       for (const el of dialog.querySelectorAll("[data-move]")) el.removeAttribute("data-acionado");
       maquina.velocidade = 0;
+      trator.velocidade = 0;
       anterior = 0;
     }
     function alinhar(inicial = false) {
@@ -185,33 +204,88 @@
     }
     function atualizarPainel() {
       const completou = completo();
+      const emTrator = dirigindo();
+      dialog.dataset.veiculo = emTrator ? "trator" : "colheitadeira";
+      leds.veiculo.textContent = emTrator ? "Trator e carreta" : "Colheitadeira";
+      leds["titulo-mapa"].textContent = emTrator ? "Estrada do silo" : "Mapa do talhão";
+      leds["radio-label"].textContent = emTrator ? "Percurso" : "Rádio da carreta";
+      leds.trajeto.hidden = !emTrator;
+      leds.carreta.hidden = emTrator;
+      $(".cab-chamada").hidden = emTrator;
+      botoes["entrar-trator"].hidden = emTrator;
+      botoes.plataforma.hidden = botoes.alinhar.hidden = emTrator;
+      botoes["entrar-colheitadeira"].hidden = botoes["descarregar-silo"].hidden = !emTrator;
+      leds["carga-carreta"].textContent = formatar(cargaCarreta(), 2) + " sc";
+      leds.estoque.textContent = formatar(estado.estoqueSc, 2) + " sc";
+      leds.graneleiro.textContent = formatar(estado.loadSc, 2) + " / " + formatar(estado.capacitySc, 2) + " sc";
+      leds.nivel.max = estado.capacitySc;
+      leds.nivel.value = estado.loadSc;
+      leds.area.textContent = formatar(estado.cutAreaHa, 2) + " / " + formatar(opcoes.areaHa, 2) + " ha";
+      if (emTrator && trator.rota) {
+        const restante = trator.rota.length - trator.distancia;
+        const naMoega = restante <= 3 && Math.abs(trator.lateral) <= 2;
+        const naOrigem = trator.distancia <= 3;
+        const parado = Math.abs(trator.velocidade) * 3.6 <= 1;
+        const local = naMoega ? "moega" : naOrigem ? "cabeceira" : "estrada";
+        const curva = manobraTrator(trator);
+        leds.trajeto.dataset.local = local;
+        leds.trajeto.dataset.manobra = curva;
+        leds.trajeto.dataset.distancia = String(Math.round(trator.distancia));
+        const destino = trator.voltar ? formatar(trator.distancia, 0) + " m até a colheitadeira" : formatar(restante, 0) + " m até a moega";
+        leds.trajeto.textContent = curva ? (curva === "esquerda" ? "← Vire à esquerda" : "→ Vire à direita") + " · " + destino : destino;
+        leds.posicao.textContent = naMoega ? "Moega do silo" : naOrigem ? "Colheitadeira estacionada" : "Estrada de serviço";
+        leds.posicao.dataset.lado = local;
+        leds.posicao.dataset.rumo = trator.voltar ? "talhao" : "silo";
+        leds.velocidade.textContent = formatar(Math.abs(trator.velocidade) * 3.6, 0) + " km/h" + (trator.velocidade < -.02 ? " · ré" : "");
+        leds.tarefa.textContent = trator.voltar ? (naOrigem ? "Chegada à colheitadeira" : "Volte ao talhão") : (naMoega ? "Carreta sobre a moega" : "Leve a carreta ao silo");
+        if(curva) {
+          leds.tarefa.textContent = curva === "esquerda" ? "Curva à esquerda para o silo" : "Curva à direita para a cabeceira";
+          leds.aviso.textContent = "Mantenha " + (curva === "esquerda" ? "← ou A" : "→ ou D") + " pressionado até completar a curva. O trator pode manobrar em marcha lenta.";
+        } else if (leds.aviso.dataset.curva) {
+          leds.aviso.textContent = trator.voltar ? "Siga pela cabeceira até a máquina estacionada." : "Siga reto até a grade da moega e pare para descarregar.";
+        }
+        leds.aviso.dataset.curva = curva;
+        for (const [mov,ladoCurva] of [["esq","esquerda"],["dir","direita"]]) {
+          dialog.querySelector('[data-move="'+mov+'"]').classList.toggle("cab-curva",curva === ladoCurva);
+        }
+        if (!naMoega && restante <= 3 && !trator.voltar) leds.aviso.textContent = "Use ← ou → em baixa velocidade para centralizar a carreta sobre a grade.";
+        botoes["entrar-colheitadeira"].disabled = !naOrigem || !parado;
+        botoes["descarregar-silo"].disabled = !naMoega || !parado || !cargaCarreta();
+        botoes["descarregar-silo"].classList.toggle("cab-comando-ativo", !botoes["descarregar-silo"].disabled);
+        botoes["entrar-colheitadeira"].classList.toggle("cab-comando-ativo", trator.voltar && !botoes["entrar-colheitadeira"].disabled);
+        leds.teclas.textContent = "W ou ↑ acelera · S ou ↓ freia e dá ré · A/D ou ←/→ ajustam a direção na estrada · U descarrega na moega · E entra na colheitadeira.";
+        desenharRota(mapaCtx, trator, maquina, passadas, true);
+        return;
+      }
+      for(const el of dialog.querySelectorAll(".cab-curva")) el.classList.remove("cab-curva");
+      leds.teclas.textContent = "W/S ou ↑/↓ aceleram e freiam · A/D ou ←/→ dirigem · Espaço move a plataforma · 1/2 chama a carreta · U descarrega · E troca de veículo.";
       const lado = ladoAtual();
       const xRumo = Math.sin(maquina.rumo), zRumo = Math.cos(maquina.rumo);
       const rumo = Math.abs(xRumo) > Math.abs(zRumo) ? (xRumo > 0 ? "leste" : "oeste") : (zRumo >= 0 ? "norte" : "sul");
       const destino = estado.trailer?.side;
       const segundos = destino ? Math.max(0, Math.ceil((estado.trailer.readyAt - Date.now()) / 1000)) : 0;
-      const podeDescarregar = destino && segundos === 0 && lado === destino && Math.abs(maquina.velocidade) * 3.6 <= 1 && estado.loadSc > 0;
+      const encaixe = clamp(maquina.x,-lateral,lateral)+3;
+      const aoLado = !Number.isFinite(estado.trailer?.parkX) || Math.abs(encaixe-estado.trailer.parkX)<=3.5;
+      const junto = destino && segundos === 0 && lado === destino && aoLado && Math.abs(maquina.velocidade) * 3.6 <= 1;
+      const podeDescarregar = junto && estado.loadSc > 0 && cargaCarreta() < estado.trailerCapacitySc;
+      botoes["entrar-trator"].disabled = !junto;
+      botoes["entrar-trator"].classList.toggle("cab-comando-ativo", Boolean(junto && cargaCarreta() && !estado.loadSc));
       const percentual = Math.round(100 * contagens[alvo] / trechosPorFaixa);
-      leds.tarefa.textContent = completou ? (estado.loadSc > 0 ? "Talhão cortado · última descarga" : "Colheita concluída") : cheio() ? "Graneleiro cheio · corte interrompido" : "Faixa " + (alvo + 1) + " de " + n + " · " + percentual + "% percorridos";
+      leds.tarefa.textContent = completou ? (estado.loadSc > 0 ? "Talhão cortado · última carga" : cargaCarreta() ? "Leve a última carga ao silo" : "Colheita concluída") : cheio() ? "Graneleiro cheio · corte interrompido" : "Faixa " + (alvo + 1) + " de " + n + " · " + percentual + "% percorridos";
       leds.velocidade.textContent = formatar(Math.abs(maquina.velocidade) * 3.6, 0) + " km/h" + (maquina.velocidade < -0.02 ? " · ré" : "");
-      leds.area.textContent = formatar(estado.cutAreaHa, 2) + " / " + formatar(opcoes.areaHa, 2) + " ha";
-      leds.estoque.textContent = formatar(estado.estoqueSc, 2) + " sc";
-      leds.graneleiro.textContent = formatar(estado.loadSc, 2) + " / " + formatar(estado.capacitySc, 2) + " sc";
-      leds.nivel.max = estado.capacitySc;
-      leds.nivel.value = estado.loadSc;
       leds.nivel.classList.toggle("cab-cheio", cheio());
       leds.posicao.textContent = (lado ? "Cabeceira " + lado : "Dentro do talhão") + " · rumo " + rumo;
       leds.posicao.dataset.lado = lado || "campo";
       leds.posicao.dataset.rumo = rumo;
-      leds.carreta.textContent = !destino ? "Escolha a cabeceira" : segundos ? "A caminho · " + lados[destino] + " · " + segundos + " s" : "Aguardando · " + lados[destino];
+      leds.carreta.textContent = !destino ? "Escolha a cabeceira" : segundos ? "A caminho · " + lados[destino] + " · " + segundos + " s" : "Estacionada · " + lados[destino] + (aoLado || lado!==destino ? "" : " · aproxime-se pelo mapa");
       for (const ponta of Object.keys(lados)) {
         const botao = botoes["chamar-" + ponta];
-        botao.disabled = Boolean(completou && !estado.loadSc);
+        botao.disabled = Boolean((completou && !estado.loadSc) || (cargaCarreta() && ponta !== destino));
         botao.setAttribute("aria-pressed", String(destino === ponta));
         botao.classList.toggle("cab-destino", destino === ponta);
       }
       botoes.descarregar.disabled = !podeDescarregar;
-      botoes.descarregar.title = !estado.loadSc ? "Graneleiro vazio" : !destino ? "Chame a carreta em uma cabeceira" : segundos ? "Aguarde a chegada da carreta" : lado !== destino ? "Vá até a cabeceira " + destino : "Pare junto à carreta";
+      botoes.descarregar.title = !estado.loadSc ? "Graneleiro vazio" : cargaCarreta() >= estado.trailerCapacitySc ? "Leve a carreta cheia ao silo" : !destino ? "Chame a carreta em uma cabeceira" : segundos ? "Aguarde a chegada da carreta" : lado !== destino ? "Vá até a cabeceira " + destino : "Pare junto à carreta";
       botoes.descarregar.classList.toggle("cab-comando-ativo", Boolean(podeDescarregar));
       botoes.plataforma.textContent = maquina.plataforma ? "Erguer plataforma" : "Baixar plataforma";
       botoes.plataforma.classList.toggle("cab-comando-ativo", maquina.plataforma);
@@ -257,7 +331,7 @@
       }
     }
     function chamar(lado) {
-      if (completo() && !estado.loadSc) return;
+      if (dirigindo() || completo() && !estado.loadSc) return;
       try {
         sincronizar(opcoes.onChamar(lado));
         guardarPosicao();
@@ -266,16 +340,63 @@
       atualizarPainel();
     }
     function descarregar() {
+      if (dirigindo()) { descarregarSilo(); return; }
       if (botoes.descarregar.disabled) return;
       const carga = estado.loadSc;
       try {
-        sincronizar(opcoes.onDescarregar(ladoAtual(), Math.abs(maquina.velocidade) * 3.6));
-        maquina.ultimaCarga = carga;
+        sincronizar(opcoes.onDescarregar(ladoAtual(), Math.abs(maquina.velocidade) * 3.6, clamp(maquina.x,-lateral,lateral)+3));
+        maquina.ultimaCarga = carga - estado.loadSc;
         maquina.descargaAte = performance.now() + 2100;
         limparPedais();
         maquina.plataforma = false;
         guardarPosicao();
-        mensagem(formatar(carga, 3) + " sc entregues. " + (completo() ? "Colheita e descarga concluídas." : "Alinhe na cabeceira e baixe a plataforma para retomar o corte."));
+        mensagem(formatar(maquina.ultimaCarga, 3) + " sc na carreta. Entre no trator e leve a carga à moega do silo.");
+      } catch (erro) { mensagem(erro.message); }
+      atualizarPainel();
+    }
+    function entrarTrator() {
+      if (dirigindo() || botoes["entrar-trator"].disabled) return;
+      try {
+        const encaixe = clamp(maquina.x,-lateral,lateral)+3;
+        sincronizar(opcoes.onEntrarTrator(ladoAtual(), Math.abs(maquina.velocidade) * 3.6, encaixe));
+        limparPedais(); maquina.plataforma = false; maquina.descargaAte = 0;
+        carregarViagem(); guardarPosicao();
+        mensagem("Você está no trator. Acelere pela estrada, faça a curva acompanhando as marcas e centralize a carreta sobre a grade do silo.");
+      } catch (erro) { mensagem(erro.message); }
+      atualizarPainel();
+    }
+    function salvarViagem() {
+      if (!dirigindo()) return;
+      const distancia = Math.min(trator.rota.length, Math.round(trator.distancia * 1000) / 1000);
+      const deslocamento = Math.round(trator.lateral * 1000) / 1000;
+      if (estado.trailer.trip.distance === distancia && estado.trailer.trip.lateral === deslocamento) return;
+      sincronizar(opcoes.onMoverTrator(distancia, deslocamento));
+    }
+    function guardarOperacao() {
+      try { salvarViagem(); }
+      catch (erro) { limparPedais(); carregarViagem(); mensagem(erro.message); }
+      guardarPosicao();
+    }
+    function descarregarSilo() {
+      if (!dirigindo() || botoes["descarregar-silo"].disabled) return;
+      try {
+        salvarViagem();
+        const carga = cargaCarreta();
+        sincronizar(opcoes.onDescarregarSilo(Math.abs(trator.velocidade) * 3.6));
+        limparPedais(); carregarViagem();
+        trator.ultimaCarga = carga; trator.descargaAte = performance.now() + 2300;
+        mensagem(formatar(carga, 3) + " sc entraram no estoque do silo. Acelere para voltar à colheitadeira.");
+      } catch (erro) { mensagem(erro.message); }
+      atualizarPainel();
+    }
+    function entrarColheitadeira() {
+      if (!dirigindo() || botoes["entrar-colheitadeira"].disabled) return;
+      try {
+        salvarViagem();
+        sincronizar(opcoes.onEntrarColheitadeira(Math.abs(trator.velocidade) * 3.6));
+        limparPedais(); trator.rota = null; trator.pose = null; trator.descargaAte = 0;
+        mensagem("Você voltou à colheitadeira. " + (completo() ? "Veja no silo a carga que já entregou." : "Alinhe a próxima passada para retomar a colheita."));
+        guardarPosicao();
       } catch (erro) { mensagem(erro.message); }
       atualizarPainel();
     }
@@ -284,6 +405,34 @@
       const ativo = (acao) => [...teclas].some((t) => codigo[t] === acao) || [...toques.values()].includes(acao);
       const gas = ativo("gas"), freio = ativo("freio");
       const direcao = Number(ativo("dir")) - Number(ativo("esq"));
+      if (dirigindo()) {
+        if (trator.descargaAte > performance.now()) return;
+        const curva = manobraTrator(trator);
+        const estercoCerto = Boolean(curva) && (curva === "esquerda" ? direcao < 0 : direcao > 0);
+        if (gas) trator.velocidade = Math.min(5.7, trator.velocidade + segundos * 2.8);
+        else if (freio) trator.velocidade = Math.max(-2.5, trator.velocidade - segundos * (trator.velocidade > 0 ? 7 : 2));
+        else if (estercoCerto) trator.velocidade = Math.min(1.45, trator.velocidade + segundos * 2);
+        else trator.velocidade -= Math.sign(trator.velocidade) * Math.min(Math.abs(trator.velocidade), segundos * 6);
+        const sentido = trator.voltar ? -1 : 1;
+        if(curva) trator.velocidade = clamp(trator.velocidade,-1.5,2.5);
+        let distancia = trator.distancia + sentido * trator.velocidade * tempoOperacional * segundos;
+        const arco = arcoDaEstrada(trator.rota);
+        if(!estercoCerto && trator.velocidade>0) {
+          if(!trator.voltar && trator.distancia<arco.fim && distancia>arco.inicio) {
+            distancia=Math.max(trator.distancia,arco.inicio); trator.velocidade=0;
+          }
+          if(trator.voltar && trator.distancia>arco.inicio && distancia<arco.fim) {
+            distancia=Math.min(trator.distancia,arco.fim); trator.velocidade=0;
+          }
+        }
+        trator.distancia = clamp(distancia, 0, trator.rota.length);
+        const manobra = trator.rota.length - trator.distancia < 4 || trator.distancia < 4;
+        const alcance = Math.min(4, Math.max(manobra ? .85 : 0, Math.abs(trator.velocidade)));
+        if(!curva) trator.lateral = clamp(trator.lateral + sentido * direcao * alcance * segundos, -3, 3);
+        if (distancia !== trator.distancia) trator.velocidade = 0;
+        trator.pose = localizarTrator(trator);
+        return;
+      }
       if (gas) maquina.velocidade = Math.min(2.85, maquina.velocidade + segundos * 2.4);
       else if (freio) maquina.velocidade = Math.max(-1.0, maquina.velocidade - segundos * (maquina.velocidade > 0 ? 5 : 1.5));
       else maquina.velocidade -= Math.sign(maquina.velocidade) * Math.min(Math.abs(maquina.velocidade), segundos * 2.8);
@@ -309,23 +458,26 @@
     }
     function animar(agora) {
       if (encerrada) return;
-      const parada = !teclas.size && !toques.size && !maquina.plataforma && agora >= maquina.descargaAte && Math.abs(maquina.velocidade) < .01;
+      const parada = !teclas.size && !toques.size && !maquina.plataforma && agora >= Math.max(maquina.descargaAte, trator.descargaAte) && Math.abs(dirigindo() ? trator.velocidade : maquina.velocidade) < .01;
       if (anterior && agora - anterior < (parada ? 150 : 22)) { quadro = requestAnimationFrame(animar); return; }
       const dt = anterior ? Math.min((agora - anterior) / 1000, 0.12) : 0;
       anterior = agora;
       simular(dt);
       if (vista3D) {
-        try { vista3D.desenhar(maquina, largura, altura, alvo, estado.trailer); }
+        try { vista3D.desenhar(maquina, largura, altura, alvo, estado.trailer, dirigindo() ? trator : null); }
         catch (erro) { console.warn("A vista da cabine passou para 2D.", erro); usarVistaSimples(); }
       }
-      if (!vista3D) render2D(maquina, largura, altura, alvo, estado.trailer);
-      if (!parada && agora - ultimaPosicaoSalva > 900) { guardarPosicao(); ultimaPosicaoSalva = agora; }
+      if (!vista3D) {
+        if (dirigindo()) desenharRota(ctx, trator, maquina, passadas, false);
+        else render2D(maquina, largura, altura, alvo, estado.trailer);
+      }
+      if (agora - ultimaPosicaoSalva > 500 && (!parada || dirigindo())) { guardarOperacao(); ultimaPosicaoSalva = agora; }
       if (agora - ultimoPainel > 140) { atualizarPainel(); ultimoPainel = agora; }
       quadro = requestAnimationFrame(animar);
     }
     function fechar() {
       if (encerrada) return;
-      guardarPosicao();
+      guardarOperacao();
       encerrada = true;
       cancelAnimationFrame(quadro);
       eventos.abort();
@@ -348,15 +500,18 @@
     comando(botoes.plataforma, plataforma);
     for (const lado of Object.keys(lados)) comando(botoes["chamar-" + lado], () => chamar(lado));
     comando(botoes.descarregar, descarregar);
+    comando(botoes["entrar-trator"], entrarTrator);
+    comando(botoes["descarregar-silo"], descarregarSilo);
+    comando(botoes["entrar-colheitadeira"], entrarColheitadeira);
     listen(dialog, "cancel", (e) => { e.preventDefault(); fechar(); });
     listen(window, "keydown", (e) => {
       if (!dialog.open) return;
       if (codigo[e.code]) { e.preventDefault(); e.stopPropagation(); teclas.add(e.code); dialog.focus({ preventScroll: true }); }
       if (e.code === "Space" && !e.target.closest("button")) {
         e.preventDefault(); e.stopPropagation();
-        if (!e.repeat) plataforma();
+        if (!e.repeat && !dirigindo()) plataforma();
       }
-      const comandos = { Digit1: () => chamar("norte"), Digit2: () => chamar("sul"), KeyU: descarregar };
+      const comandos = { Digit1: () => chamar("norte"), Digit2: () => chamar("sul"), KeyU: descarregar, KeyE: () => dirigindo() ? entrarColheitadeira() : entrarTrator() };
       if (comandos[e.code] && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault(); e.stopPropagation();
         if (!e.repeat) comandos[e.code]();
@@ -370,17 +525,25 @@
       const release = (e) => { toques.delete(e.pointerId); delete el.dataset.acionado; };
       listen(el, "pointerup", release); listen(el, "pointercancel", release); listen(el, "lostpointercapture", release);
     }
-    listen(window, "blur", limparPedais);
-    listen(document, "visibilitychange", () => { if (document.hidden) { limparPedais(); guardarPosicao(); } });
-    listen(window, "pagehide", guardarPosicao);
+    listen(window, "blur", () => { guardarOperacao(); limparPedais(); });
+    listen(document, "visibilitychange", () => { if (document.hidden) { limparPedais(); guardarOperacao(); } });
+    listen(window, "pagehide", guardarOperacao);
     dialog.tabIndex = -1;
     dialog.showModal();
     dialog.focus({ preventScroll: true });
     if (restaurarPosicao()) {
       mensagem(cheio() ? "Graneleiro cheio. Dirija até a cabeceira combinada e pare para descarregar." : completo() && estado.loadSc > 0 ? "Última carga a bordo. Chame a carreta para descarregar." : "Operação retomada. Confira o graneleiro e o rádio.");
+    } else if (estado.trailer && (dirigindo() || cargaCarreta() > 0)) {
+      const linha = passadas.findIndex((_,i) => !estado.concluidas?.includes(i));
+      alvo = Math.max(0, linha);
+      maquina.x = dirigindo() ? estado.trailer.trip.startX - 3 : Number.isFinite(estado.trailer.parkX) ? estado.trailer.parkX - 3 : centro(alvo);
+      maquina.z = estado.trailer.side === "sul" ? -7 : comprimento + 7;
+      maquina.rumo = estado.trailer.side === "sul" ? 0 : Math.PI;
+      mensagem("Carreta na cabeceira. Entre no trator para levar os grãos até o silo.");
     } else {
       alinhar(true);
     }
+    if (dirigindo()) mensagem(trator.voltar ? "Viagem retomada. Acelere para voltar à colheitadeira." : "Viagem retomada. Siga as marcas da estrada até a moega.");
     const resize = new ResizeObserver(dimensionar);
     resize.observe(canvas);
     dimensionar();
@@ -393,8 +556,85 @@
   function posicaoCarreta(carreta, maquinaX, metade) {
     if (!carreta) return null;
     const falta = clamp((carreta.readyAt - Date.now()) / 5000, 0, 1);
-    const esperaX = clamp(maquinaX, -metade, metade) + 3;
+    const esperaX = Number.isFinite(carreta.parkX) ? carreta.parkX : clamp(maquinaX, -metade, metade) + 3;
     return { x: esperaX + (metade + 12 - esperaX) * falta, z: carreta.side === "sul" ? -9 : comprimento + 9 };
+  }
+
+  // A estrada segue a cabeceira e dobra na lateral leste do talhão. A curva
+  // arredondada mantém o avanço, esterçamento e câmera contínuos no cotovelo.
+  function arcoDaEstrada(rota) {
+    const reta=rota.points[1].x-rota.points[0].x, raio=Math.min(6,reta*.45);
+    return {reta,raio,inicio:reta-raio,fim:reta+raio};
+  }
+  function manobraTrator(t) {
+    const arco=arcoDaEstrada(t.rota);
+    if(!t.voltar && t.distancia >= arco.inicio-.15 && t.distancia < arco.fim) return "esquerda";
+    if(t.voltar && t.distancia <= arco.fim+.15 && t.distancia > arco.inicio) return "direita";
+    return "";
+  }
+  function localizarTrator(t) {
+    const [inicio, curva] = t.rota.points;
+    const {reta,raio} = arcoDaEstrada(t.rota);
+    const d = t.distancia;
+    // Ao sair da moega o conjunto ainda aponta para o silo. O pátio tem
+    // espaço para fazer a volta enquanto o jogador acelera com a carreta vazia.
+    const manobra = t.rota.length - d;
+    if(t.voltar && manobra < 18) {
+      const u=manobra/18, silo=t.rota.points[2];
+      const x=silo.x-6*Math.sin(Math.PI*u)**2;
+      const z=silo.z+14*u-64*u*u+32*u*u*u;
+      const rumo=Math.atan2(-6*Math.PI*Math.sin(2*Math.PI*u),14-128*u+96*u*u);
+      const lateral=t.lateral*Math.cos(Math.PI*u);
+      return { x:x+lateral*Math.cos(rumo), z:z-lateral*Math.sin(rumo), rumo };
+    }
+    let x, z, rumo;
+    if (d <= reta - raio) { x = inicio.x + d; z = inicio.z; rumo = Math.PI / 2; }
+    else if (d >= reta + raio) { x = curva.x; z = curva.z + d - reta; rumo = 0; }
+    else {
+      const a = (d - reta + raio) / (2 * raio) * Math.PI / 2;
+      x = curva.x - raio + raio * Math.sin(a);
+      z = curva.z + raio - raio * Math.cos(a);
+      rumo = Math.PI / 2 - a;
+    }
+    x += t.lateral * Math.cos(rumo); z -= t.lateral * Math.sin(rumo);
+    return { x, z, rumo: rumo + (t.voltar ? Math.PI : 0) };
+  }
+
+  function desenharRota(c, t, m, passadas, mini) {
+    const w = mini ? c.canvas.width : c.canvas.clientWidth, h = mini ? c.canvas.height : c.canvas.clientHeight;
+    const escala = Math.min(w / 104, h / 164);
+    const sx = mini ? w/98 : escala, sz = mini ? h/164 : escala;
+    const mx = x => w / 2 + (x - 7) * sx, my = z => h / 2 - (z - 63) * sz;
+    const ret = (x,z,dx,dz,cor) => { c.fillStyle=cor; c.fillRect(mx(x),my(z+dz),dx*sx,dz*sz); };
+    c.clearRect(0,0,w,h);
+    c.fillStyle = mini ? "#21362e" : "#80935e"; c.fillRect(0,0,w,h);
+    ret(-28,0,56,96,"#b99b56");
+    passadas.forEach((faixa,f) => faixa.forEach((cortada,i) => { if (cortada) ret(-28+7*f,i*3,7,3,"#81674b"); }));
+    const [a,b,silo] = t.rota.points;
+    c.beginPath(); c.moveTo(mx(a.x),my(a.z)); c.lineTo(mx(b.x),my(b.z)); c.lineTo(mx(silo.x),my(silo.z));
+    c.lineWidth=Math.max(mini?3:5,8*escala); c.strokeStyle=mini?"#ae9980":"#bea686"; c.lineJoin="round"; c.stroke();
+    ret(32,127,12,14,"#626e67");
+    for(let z=128;z<140;z+=1.5) ret(33,z,10,.55,"#aaa48c");
+    for (const x of [22,29]) { c.beginPath(); c.arc(mx(x),my(139),3.3*escala,0,2*Math.PI); c.fillStyle="#d7ddd8"; c.fill(); }
+    if (!mini) {
+      c.font="bold 14px sans-serif"; c.fillStyle="#132b21"; c.fillText("SILO",mx(20),my(148));
+      c.fillText("Talhão",mx(-12),my(48)); c.fillText("Colheitadeira",mx(m.x)-30,my(m.z)+24);
+    } else {
+      c.font="bold 16px sans-serif"; c.textAlign="right"; c.fillStyle="#f2e6b8";
+      c.fillText("Silo",mx(17),my(139)+5); c.textAlign="start";
+    }
+    c.fillStyle="#ecdc6e"; c.fillRect(mx(m.x)-3,my(m.z)-3,6,6);
+    const p=t.pose;
+    c.save(); c.translate(mx(p.x),my(p.z)); c.rotate(p.rumo);
+    const u=mini ? Math.max(1,escala*.66) : escala;
+    c.fillStyle="#e88543"; c.fillRect(-2.1*u,-3*u,4.2*u,6*u);
+    c.fillStyle="#496c40"; c.strokeStyle="#ecf2aa"; c.lineWidth=1;
+    c.fillRect(-1.5*u,-7*u,3*u,3.6*u); c.strokeRect(-1.5*u,-7*u,3*u,3.6*u);
+    c.restore();
+    if (performance.now()<t.descargaAte && !mini) {
+      c.fillStyle="#173425"; c.fillRect(12,h-48,230,34);
+      c.fillStyle="#fbefca"; c.font="bold 14px sans-serif"; c.fillText(formatar(t.ultimaCarga,3)+" sc descarregadas na moega",22,h-26);
+    }
   }
   function desenharMapa(c, m, passadas, alvo, carreta) {
     const w = c.canvas.width, h = c.canvas.height;

@@ -5,11 +5,11 @@
   const form = document.getElementById("profile-form");
   const nickname = document.getElementById("nickname");
   const resume = document.getElementById("resume");
-  if (location.hash === "#colheita") resume.hash = "colheita";
   const error = document.getElementById("form-error");
   const storageError = "O navegador não conseguiu guardar o perfil. Permita que o site salve dados ou abra-o em outro navegador.";
 
   function mostrarEntrada() {
+    resume.hash = ["#colheita", "#silo"].includes(location.hash) ? location.hash : "";
     let perfil;
     try {
       perfil = window.FarmeiroPerfil.ler();
@@ -44,5 +44,6 @@
     location.assign(resume.href);
   });
   window.addEventListener("pageshow", mostrarEntrada);
+  window.addEventListener("hashchange", mostrarEntrada);
   mostrarEntrada();
 })();

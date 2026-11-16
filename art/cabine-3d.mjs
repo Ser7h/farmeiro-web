@@ -129,7 +129,9 @@ function entorno(cena,metade) {
   const arvores=[];
   for(let i=0;i<94;i++) {
     const a=i*tau/94+rnd()*.03, r=72+rnd()*26;
-    arvores.push([Math.cos(a)*r,-48+Math.sin(a)*r,4+rnd()*4.6]);
+    const x=Math.cos(a)*r, z=-48+Math.sin(a)*r, alt=4+rnd()*4.6;
+    if (x>27 && x<62 && z<17 && z>-160) continue;
+    arvores.push([x,z,alt]);
   }
   for(let i=0;i<13;i++) arvores.push([-metade-16-rnd()*7,8-i*9,5+rnd()*2.3]);
   const dummy=new T.Object3D();
@@ -150,9 +152,14 @@ function entorno(cena,metade) {
   cena.add(troncos,copas);
   const arame=[],estacas=[];
   for(const lado of [-1,1]) {
-    const x=lado*(metade+12);
-    for(let z=-112;z<=24;z+=6) estacas.push([x,z]);
-    for(const h of [.47,.83]) arame.push(x,h,-112,x,h,20);
+    const x=lado*(metade+(lado>0?22:12));
+    for(let z=-112;z<=24;z+=6) {
+      if(lado<0 || (z>-97 && z<2) || z>17) estacas.push([x,z]);
+    }
+    for(const h of [.47,.83]) {
+      if(lado<0) arame.push(x,h,-112,x,h,20);
+      else arame.push(x,h,-96,x,h,2);
+    }
   }
   const postes=new T.InstancedMesh(new T.BoxGeometry(.14,1.15,.14),material("#806a4a"),estacas.length);
   estacas.forEach(([x,z],i)=>{
@@ -333,6 +340,89 @@ function prepararDescarga(cena, cabine, carreta) {
   };
 }
 
+function instalarMoega(cena) {
+  const {x,z} = window.Farm.silo;
+  const base = new T.Group(); base.name="RecepcaoDoSilo"; base.position.set(x,0,-z); cena.add(base);
+  const aco=material("#526158",{metalness:.26}), zinco=material("#c1c7b7",{metalness:.30}), faixa=material("#d5a646");
+  function caixa(w,h,d,px,py,pz,mat,pai=base) {
+    const obj=new T.Mesh(new T.BoxGeometry(w,h,d),mat);
+    obj.position.set(px,py,pz); pai.add(obj); return obj;
+  }
+  const terra=textura(160,160,(ctx,w,h)=>{
+    const rnd=sorteio(418);ctx.fillStyle="#b79f7d";ctx.fillRect(0,0,w,h);
+    for(let i=0;i<2300;i++){ctx.fillStyle=i%2?"#ae9574":"#c1ae90";ctx.fillRect(rnd()*w,rnd()*h,1+rnd()*3,1+rnd()*2);}
+  });
+  terra.wrapS=terra.wrapT=T.RepeatWrapping; terra.repeat.set(5,35);
+  const leito=material("#e4ccad",{map:terra}), rastro=material("#b7a07c");
+  plano(cena,10,z+27,x,-.02,-(z-21)/2,leito);
+  for(const offset of [-1.6,1.6]) plano(cena,.55,z+13,x+offset,-.006,-(z-11)/2,rastro);
+  for(const cabeceira of [-9,105]) {
+    plano(cena,72,10,5,-.019,-cabeceira,leito);
+    for(const offset of [-1.6,1.6]) plano(cena,64,.45,3,-.005,-cabeceira+offset,rastro);
+  }
+  plano(base,41,34,2,.006,0,material("#a99d83"));
+  const grade=caixa(7,.13,11,0,.075,0,material("#313d37")); grade.name="Moega";
+  for(let i=-5;i<=5;i+=.5) caixa(6.85,.09,.13,0,.17,i,aco);
+  for(const borda of [-3.72,3.72]) {
+    caixa(.50,.14,11,borda,.12,0,faixa);
+    for(let i=-4.6;i<5;i+=1.5) caixa(.51,.035,.56,borda,.203,i,aco);
+  }
+  for(const sx of [8,15]) {
+    const corpo = new T.Mesh(new T.CylinderGeometry(3.1,3.1,9.2,32),zinco);
+    corpo.position.set(sx,4.65,-2); base.add(corpo);
+    for(let h=.8;h<9.2;h+=1.3){
+      const cinta=new T.Mesh(new T.TorusGeometry(3.12,.042,4,32),aco);
+      cinta.rotation.x=Math.PI/2;cinta.position.set(sx,h,-2);base.add(cinta);
+    }
+    const telhado=new T.Mesh(new T.ConeGeometry(3.36,1.7,32),zinco);
+    telhado.position.set(sx,10.05,-2);base.add(telhado);
+  }
+  const placa=textura(480,126,(c,w,h)=>{
+    c.fillStyle="#193d36";c.fillRect(0,0,w,h);c.strokeStyle="#d9c68e";c.lineWidth=5;c.strokeRect(5,5,w-10,h-10);
+    c.fillStyle="#fff1c8";c.font="bold 54px sans-serif";c.textAlign="center";c.fillText("MOEGA",w/2,67);
+    c.font="bold 24px sans-serif";c.fillText("RECEPÇÃO DE GRÃOS",w/2,102);
+  });
+  for (const sx of [-5,-10]) caixa(.14,4,.14,sx,2,-9,aco);
+  const letreiro=new T.Mesh(new T.PlaneGeometry(6.3,1.63),new T.MeshBasicMaterial({map:placa,side:T.DoubleSide}));
+  letreiro.position.set(-7.5,3.35,-9); base.add(letreiro);
+  const geometria=new T.BufferGeometry();
+  const pos=new T.Float32BufferAttribute(new Float32Array(72*3),3);pos.setUsage(T.DynamicDrawUsage);
+  geometria.setAttribute("position",pos);
+  const graos=new T.Points(geometria,new T.PointsMaterial({color:"#dcb15d",size:.11}));
+  graos.name="FluxoNaMoega";graos.visible=false;graos.frustumCulled=false;cena.add(graos);
+  const rnd=sorteio(361), fluxo=Array.from({length:pos.count},()=>[rnd()-.5,rnd()-.5,rnd()]);
+  return function animar(ativo,carretaX,carretaZ) {
+    graos.visible=ativo;
+    if(!ativo)return;
+    graos.position.set(carretaX,0,-carretaZ);
+    const instante=performance.now()/700;
+    fluxo.forEach(([dx,dz,f],i)=>{
+      const queda=(instante+f)%1;
+      pos.setXYZ(i,dx*(.24+queda*.42),.15+.99*(1-queda*queda),dz*(.36+queda*.36));
+    });
+    pos.needsUpdate=true;
+  };
+}
+
+function exteriorColheitadeira(corpo) {
+  const exterior=new T.Group();exterior.name="CarroceriaColheitadeira";corpo.add(exterior);
+  const verde=material("#7a803d"), metal=material("#444c3d"), borracha=material("#31332e"), amarelo=material("#c6a344");
+  function caixa(w,h,d,x,y,z,mat) {
+    const g=new T.Mesh(new T.BoxGeometry(w,h,d),mat);g.position.set(x,y,z);exterior.add(g);
+  }
+  caixa(2.8,.95,5.2,0,1.32,1.4,metal);
+  caixa(3.04,1.65,3.2,0,2.15,2.2,verde);caixa(3.18,.36,2.84,0,3.16,2,verde);
+  caixa(2.54,.14,2.4,0,3.39,2,metal);
+  for(const lado of [-1,1]) for(const [z,r] of [[.02,1.03],[3.78,.71]]){
+    for(const [raio,larg,cor] of [[r,.49,borracha],[r*.55,.51,amarelo]]){
+      const roda=new T.Mesh(new T.CylinderGeometry(raio,raio,larg,16),cor);
+      roda.position.set(lado*1.48,r,z);roda.rotation.z=Math.PI/2;exterior.add(roda);
+    }
+  }
+  exterior.visible=false;
+  return exterior;
+}
+
 function liberar(cenas) {
   const geometrias=new Set(),materiais=new Set(),texturas=new Set();
   for(const cena of cenas) cena.traverse(obj=>{
@@ -389,25 +479,31 @@ export async function criarVista3D(canvas,{faixas,cultura,passadas,posicaoCarret
     const [cabine,plataforma,carreta]=await lerModelos(cena,signal);
     const metade=faixas*larguraFaixa/2;
     const camera=new T.PerspectiveCamera(66,1,.055,400);
+    const cameraTrator=new T.PerspectiveCamera(52,1,.16,410);
+    cameraTrator.name="CameraTrator"; cena.add(cameraTrator);
     const corpo=new T.Group();
     cena.fog=new T.FogExp2("#c4c9b1",.0062);
     iluminar(cena);
     const horizonte=ceu(cena);
     montes(cena);solo(cena,metade);entorno(cena,metade);
+    const animarMoega=instalarMoega(cena);
     const atualizarCorte=lavoura(cena,faixas,passadas,cultura);
     const limites=balizas(cena);
     const mostrarDescarga=prepararDescarga(transbordo,cabine,carreta);
     corpo.add(cabine,plataforma,camera);
+    const exterior=exteriorColheitadeira(corpo);
     cena.add(corpo);
     cabine.position.y=alturaOlhos;
     plataforma.position.set(0,0,-2.17);
     camera.position.set(0,alturaOlhos+.16,-.11);
     camera.rotation.x=-.235;
     carreta.rotation.y=Math.PI/2;
+    const graoCarreta=carreta.getObjectByName("Graos");
+    const baseGraos=graoCarreta.position.clone(), escalaGraos=graoCarreta.scale.clone();
     const volante=cabine.getObjectByName("Volante"),molinete=plataforma.getObjectByName("Molinete"),tubo=cabine.getObjectByName("TuboDescarga");
     const baseVolante=volante?.quaternion.clone(),baseMolinete=molinete?.quaternion.clone(),baseTubo=tubo?.quaternion.clone();
     let ultimoW=0,ultimoH=0,alturaCabecote=.34;
-    function desenhar(m,w,h,alvo,carro) {
+    function desenhar(m,w,h,alvo,carro,trator) {
       if(fechou || w<1 || h<1)return;
       if(w!==ultimoW || h!==ultimoH) {
         ultimoW=w;ultimoH=h;
@@ -418,11 +514,13 @@ export async function criarVista3D(canvas,{faixas,cultura,passadas,posicaoCarret
         camera.aspect=w/h;
         camera.fov=camera.aspect<1 ? 78 : 66;
         camera.updateProjectionMatrix();
+        cameraTrator.aspect=w/h;cameraTrator.fov=w<h?67:52;cameraTrator.updateProjectionMatrix();
       }
       corpo.position.set(m.x,0,-m.z);
       corpo.rotation.y=-m.rumo;
       horizonte.position.set(m.x,0,-m.z);
       limites.position.x=(alvo-(faixas-1)/2)*larguraFaixa;
+      exterior.visible=Boolean(trator);
       alturaCabecote += ((m.plataforma?0:.37)-alturaCabecote)*.34;
       plataforma.position.y=alturaCabecote;
       if(volante) {
@@ -438,10 +536,34 @@ export async function criarVista3D(canvas,{faixas,cultura,passadas,posicaoCarret
         tubo.quaternion.copy(baseTubo);
         if(restante>0)tubo.rotateY(-1.86*Math.min(1,(2100-restante)/260,restante/260));
       }
-      const chegada=carro && posicaoCarreta(carro,m.x,metade);
+      const chegada=trator ? trator.pose : carro && posicaoCarreta(carro,m.x,metade);
       carreta.visible=Boolean(chegada);
       if(chegada)carreta.position.set(chegada.x,0,-chegada.z);
+      const descarregando=Boolean(trator && trator.descargaAte>performance.now());
+      let carga=carro?.loadSc || 0;
+      if(descarregando)carga=trator.ultimaCarga*limitar((trator.descargaAte-performance.now())/2300,0,1);
+      const nivel=limitar(carga/120,0,1);
+      graoCarreta.visible=carga>.001;
+      graoCarreta.position.copy(baseGraos);
+      graoCarreta.position.y-=(1-nivel)*.76;
+      const escala=.76+.24*nivel;
+      graoCarreta.scale.set(escalaGraos.x*escala,escalaGraos.y,escalaGraos.z*escala);
+      carreta.rotation.y=trator?-chegada.rumo:-Math.PI/2;
+      animarMoega(descarregando,chegada?.x||0,chegada?.z||0);
       atualizarCorte();
+      if(trator){
+        const p=trator.pose, sn=Math.sin(p.rumo), cs=Math.cos(p.rumo);
+        const recuo=w<h?17.5:13.8;
+        if(descarregando){
+          cameraTrator.position.set(p.x-7.4,2.9,-p.z+6.9);
+          cameraTrator.lookAt(p.x+1.0,1.45,-p.z-.6);
+        }else{
+          cameraTrator.position.set(p.x-sn*recuo+cs*2.8,w<h?8.5:7.8,-p.z+cs*recuo+sn*2.8);
+          cameraTrator.lookAt(p.x+sn*6,1.1,-p.z-cs*6);
+        }
+        renderer.render(cena,cameraTrator);
+        return;
+      }
       renderer.render(cena,camera);
       if(restante>0)mostrarDescarga(renderer,(2100-restante)/1000,w,h);
     }

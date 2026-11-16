@@ -382,7 +382,23 @@ function below() {
     `<div class="section-head"><h2>Talhões da fazenda</h2><small>${fmt(offer().usable)} ha úteis</small></div><div class="plotstrip">${s.plots.map((p) => `<button class="plotcard ${p.id === plotId ? "on" : ""}" data-action="plot" data-param="${p.id}"><b>${ic("field", 16)}${p.name}</b><small>${fmt(p.area || 0)} de ${fmt(p.ha)} ha · ${p.crop ? esc(p.crop) + " · " : ""}${esc(p.phase)}</small></button>`).join("")}</div>
 <div class="agenda"><div><strong>${s.stage === "plan" ? "Monte o plano de safra" : s.stage === "closed" ? "Balanço da primeira safra" : "Calendário da fazenda"}</strong><span>${s.stage === "plan" ? "Escolha área, insumos e máquina." : s.stage === "closed" ? "Decisões e resultados disponíveis." : esc(fieldActivity())}</span></div>${btn(s.stage === "plan" ? "start" : s.stage === "closed" ? "report" : "next-map", s.stage === "plan" ? "Iniciar safra" : s.stage === "closed" ? "Ver balanço" : "Próximo marco", "calendar", "primary")}</div>`;
 }
+function hasTransport(p) {
+  const trailer = p.combine?.trailer;
+  return Boolean(trailer && (trailer.loadSc > 0 || trailer.driving));
+}
+function hasFieldOperation(p) {
+  return (p.phase === "Maduro" && !p.harvested) || p.combine?.loadSc > 0 || hasTransport(p);
+}
+function transportAction(p) {
+  const trailer = p.combine.trailer;
+  return trailer.loadSc > 0 ? "Levar a carreta ao silo" : "Retomar o trator";
+}
 function fieldActivity() {
+  const hauling = s.plots.find(hasTransport);
+  if (hauling) {
+    const load = hauling.combine.trailer.loadSc;
+    return load > 0 ? "Carreta do " + hauling.name + " com " + sacks(load) + " para levar ao silo." : "Trator do " + hauling.name + " em operação.";
+  }
   const fieldwork = s.plots.find((p) => p.lastFieldwork?.day === s.day);
   if (fieldwork) return fieldwork.lastFieldwork.label;
   const job = s.plots.find((p) => p.crop && (p.actualSowDay === s.day || p.scheduledN === s.day));
@@ -484,8 +500,9 @@ function seasonPanel(p, f) {
   let nextAction = cta("calendar", "Avançar calendário");
   if (s.stage === "accounts") nextAction = cta("close-review", "Fechar safra");
   if (stock > 0) nextAction = cta("sale", "Vender estoque", p.id);
-  if (ready || p.combine?.loadSc > 0) {
-    const label = ready ? (Farm.harvestedArea(p) > 0 ? "Continuar colheita" : "Colher talhão") : "Descarregar graneleiro";
+  if (hasFieldOperation(p)) {
+    let label = ready ? (Farm.harvestedArea(p) > 0 ? "Continuar colheita" : "Colher talhão") : "Descarregar graneleiro";
+    if (hasTransport(p)) label = transportAction(p);
     nextAction = cta("harvest", label, p.id);
     if (stock > 0) nextAction += btn("sale", "Vender estoque", "truck", "secondary", p.id);
   }

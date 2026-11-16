@@ -17,7 +17,9 @@
   const harvestRows = 8;
   const cellsPerRow = 32;
   const combineCapacity = 60; // Sacas de 60 kg, nesta máquina da campanha.
+  const trailerCapacity = 120;
   const trailerTravelMs = 5000;
+  const silo = Object.freeze({ x: 38, z: 134 });
   const uncutRow = "0".repeat(cellsPerRow), cutRow = "1".repeat(cellsPerRow);
   const DUE = 180,
     PEAK = 65;
@@ -686,9 +688,39 @@
     const c = p.combine || newCombine(p);
     return {
       cells: c.rows.map((row) => Array.from(row, (cell) => cell === "1")),
-      loadSc: c.loadSc, capacitySc: combineCapacity, trailer: c.trailer && { ...c.trailer },
+      loadSc: c.loadSc, capacitySc: combineCapacity, trailerCapacitySc: trailerCapacity,
+      trailer: c.trailer && { loadSc: 0, driving: false, ...c.trailer, trip: c.trailer.trip ? { ...c.trailer.trip } : null },
       cutAreaHa: harvestedArea(p),
     };
+  }
+  function tractorRoute(side, startX) {
+    check(["norte", "sul"].includes(side) && Number.isFinite(startX) && Math.abs(startX) <= 32,
+      "Ponto de embarque na cabeceira inválido.");
+    const z = side === "norte" ? 105 : -9;
+    return {
+      points: [{ x: startX, z }, { x: silo.x, z }, { ...silo }],
+      length: silo.x - startX + silo.z - z,
+    };
+  }
+  function validTrailer(t) {
+    if (!t || !["norte", "sul"].includes(t.side) || !Number.isSafeInteger(t.readyAt) || t.readyAt < 0) return false;
+    if (t.parkX !== undefined && (!Number.isFinite(t.parkX) || Math.abs(t.parkX) > 32)) return false;
+    // Nas partidas anteriores a carreta só guardava a cabeceira e a hora da chegada.
+    if (t.loadSc === undefined && t.driving === undefined && t.trip === undefined) return true;
+    if (!Number.isFinite(t.loadSc) || round(t.loadSc, 3) !== t.loadSc || t.loadSc < 0 || t.loadSc > trailerCapacity ||
+        typeof t.driving !== "boolean") return false;
+    if (!t.driving) return t.trip === null;
+    const trip = t.trip;
+    return trip && Number.isFinite(trip.startX) && Math.abs(trip.startX) <= 32 &&
+      (t.parkX === undefined || t.parkX === trip.startX) &&
+      Number.isFinite(trip.distance) && trip.distance >= 0 && trip.distance <= tractorRoute(t.side, trip.startX).length &&
+      Number.isFinite(trip.lateral) && Math.abs(trip.lateral) <= 3 && typeof trip.returning === "boolean" &&
+      (!trip.returning || t.loadSc === 0);
+  }
+  function parkingX(t, x) {
+    check(Number.isFinite(x) && Math.abs(x) <= 32, "Posição da carreta na cabeceira inválida.");
+    check(t.parkX === undefined || Math.abs(x - t.parkX) <= 3.5, "Aproxime-se da carreta estacionada na cabeceira.");
+    return t.parkX ?? x;
   }
   function validCombine(p, day) {
     const c = p.combine;
@@ -698,8 +730,7 @@
         !c.partial || typeof c.partial !== "object" || Array.isArray(c.partial) ||
         !Number.isFinite(c.loadSc) || round(c.loadSc, 3) !== c.loadSc ||
         c.loadSc < 0 || c.loadSc > combineCapacity || c.loadSc > p.production) return false;
-    if (c.trailer !== null && (!c.trailer || !["norte", "sul"].includes(c.trailer.side) ||
-        !Number.isSafeInteger(c.trailer.readyAt) || c.trailer.readyAt < 0)) return false;
+    if (c.trailer !== null && !validTrailer(c.trailer)) return false;
     for (const [key, progress] of Object.entries(c.partial)) {
       const i = Number(key);
       if (String(i) !== key || !Number.isInteger(i) || i < 0 || i >= harvestRows * cellsPerRow ||
@@ -859,7 +890,7 @@
   function refresh(s) {
     if (!["season", "harvest", "accounts"].includes(s.stage)) return;
     const crops = s.plots.filter((p) => p.crop);
-    if (crops.every((p) => p.harvested && p.stocks === 0 && !p.combine?.loadSc)) s.stage = "accounts";
+    if (crops.every((p) => p.harvested && p.stocks === 0 && !p.combine?.loadSc && !p.combine?.trailer?.loadSc)) s.stage = "accounts";
     else if (crops.some((p) => p.phase === "Maduro" || p.harvested)) s.stage = "harvest";
     else s.stage = "season";
   }
@@ -1075,7 +1106,7 @@
       if (dayStep(s)) break;
     }
   }
-  function apply(s, type, a) {
+  function apply(s, type, a, replay) {
     const before = forecast(s),
       pId = a.id;
     check(s.stage !== "closed", "A safra já foi encerrada. Volte a uma decisão para jogar novamente.");
@@ -1525,6 +1556,7 @@
       }
       case "cutCell": {
         const p = plotBy(s, pId);
+        check(!s.plots.some(plot => plot.combine?.trailer?.driving), "Volte à colheitadeira antes de retomar o corte.");
         cutInCabin(s, p, a.row, a.cell, a.endCell);
         label = "Colheu na faixa " + (a.row + 1) + " do " + p.name + ".";
         break;
@@ -1537,8 +1569,10 @@
         check(Number.isSafeInteger(a.now) && a.now >= 0 && Number.isSafeInteger(a.now + trailerTravelMs), "Horário de chamada inválido.");
         const c = p.combine ||= newCombine(p);
         if (c.trailer?.side === a.side) return s;
+        check(!s.plots.some(plot => plot.combine?.trailer?.driving || plot.combine?.trailer?.loadSc > 0),
+          "A carreta está em operação. Entregue a carga no silo e retorne à cabeceira.");
         for (const other of s.plots) if (other !== p && other.combine) other.combine.trailer = null;
-        c.trailer = { side: a.side, readyAt: a.now + trailerTravelMs };
+        c.trailer = { side: a.side, readyAt: a.now + trailerTravelMs, loadSc: 0, driving: false, trip: null };
         label = "Chamou a carreta na cabeceira " + a.side + " do " + p.name + ".";
         break;
       }
@@ -1548,9 +1582,79 @@
         check(c.trailer && c.trailer.side === a.side, "Encontre a carreta na cabeceira escolhida.");
         check(Number.isSafeInteger(a.now) && a.now >= c.trailer.readyAt, "A carreta ainda está a caminho.");
         check(Number.isFinite(a.speedKmh) && Math.abs(a.speedKmh) <= 1, "Pare a colheitadeira para descarregar.");
-        marketStorage.receiveHarvest(s, p, c.loadSc);
-        label = "Descarregou " + c.loadSc.toLocaleString("pt-BR") + " sc na carreta na cabeceira " + a.side + ".";
-        c.loadSc = 0;
+        check(!c.trailer.driving, "A carreta precisa estar estacionada na cabeceira.");
+        // O relatório pode reexecutar uma safra antiga em outro contrato. Antes
+        // da estrada, a descarga registrada na cabeceira já tinha entrado no silo.
+        if (replay && !replay.destination) {
+          marketStorage.receiveHarvest(s, p, c.loadSc);
+          c.loadSc = 0;
+          label = replay.label;
+          break;
+        }
+        const carried = Math.round((c.trailer.loadSc || 0) * 1000);
+        const transfer = Math.min(Math.round(c.loadSc * 1000), trailerCapacity * 1000 - carried);
+        check(transfer > 0, "A carreta está cheia. Leve a carga ao silo.");
+        if (a.x !== undefined) c.trailer.parkX = parkingX(c.trailer, a.x);
+        c.trailer.loadSc = (carried + transfer) / 1000;
+        c.trailer.driving = false;
+        c.trailer.trip = null;
+        c.loadSc = (Math.round(c.loadSc * 1000) - transfer) / 1000;
+        detail = { destination: "trailer" };
+        label = "Transferiu " + (transfer / 1000).toLocaleString("pt-BR") + " sc para a carreta na cabeceira " + a.side + ".";
+        break;
+      }
+      case "boardTractor": {
+        const t = plotBy(s, pId).combine?.trailer;
+        check(t && !t.driving && t.side === a.side, "Encontre o trator na cabeceira escolhida.");
+        check(Number.isSafeInteger(a.now) && a.now >= t.readyAt, "A carreta ainda está a caminho.");
+        check(Number.isFinite(a.speedKmh) && Math.abs(a.speedKmh) <= 1, "Pare a colheitadeira antes de entrar no trator.");
+        const startX = parkingX(t, a.x);
+        t.loadSc ??= 0;
+        t.driving = true;
+        t.trip = { startX, distance: 0, lateral: 0, returning: false };
+        label = "Assumiu o trator na cabeceira " + t.side + ".";
+        break;
+      }
+      case "moveTractor": {
+        const t = plotBy(s, pId).combine?.trailer;
+        check(t?.driving && t.trip, "Entre no trator para dirigir.");
+        const length = tractorRoute(t.side, t.trip.startX).length;
+        check(Number.isFinite(a.distance) && a.distance >= 0 && a.distance <= length &&
+          Number.isFinite(a.lateral) && Math.abs(a.lateral) <= 3, "Posição fora da estrada do silo.");
+        check(replay || Math.abs(t.trip.distance - a.distance) <= 40, "Percorra a estrada até a moega.");
+        if (t.trip.distance === a.distance && t.trip.lateral === a.lateral) return s;
+        t.trip.distance = a.distance;
+        t.trip.lateral = a.lateral;
+        // Um só registro por trajeto contínuo é suficiente para reproduzir a posição.
+        const last = s.history.at(-1);
+        if (last?.type === type && last.args.id === pId && last.day === s.day) {
+          last.args = clone(a);
+          return s;
+        }
+        label = "Conduziu o trator pela estrada do silo.";
+        break;
+      }
+      case "unloadSilo": {
+        const p = plotBy(s, pId), t = p.combine?.trailer;
+        check(t?.driving && t.trip, "Entre no trator antes de descarregar no silo.");
+        check(t.loadSc > 0, "A carreta está vazia.");
+        check(tractorRoute(t.side, t.trip.startX).length - t.trip.distance <= 3 && Math.abs(t.trip.lateral) <= 2,
+          "Posicione a carreta sobre a moega do silo.");
+        check(Number.isFinite(a.speedKmh) && Math.abs(a.speedKmh) <= 1, "Pare o trator na moega para descarregar.");
+        marketStorage.receiveHarvest(s, p, t.loadSc);
+        label = "Entregou " + t.loadSc.toLocaleString("pt-BR") + " sc do " + p.name + " no silo.";
+        t.loadSc = 0;
+        t.trip.returning = true;
+        break;
+      }
+      case "parkTractor": {
+        const t = plotBy(s, pId).combine?.trailer;
+        check(t?.driving && t.trip && t.trip.distance <= 3, "Retorne à cabeceira onde deixou a colheitadeira.");
+        check(Number.isFinite(a.speedKmh) && Math.abs(a.speedKmh) <= 1, "Pare o trator antes de voltar à colheitadeira.");
+        t.parkX = t.trip.startX;
+        t.driving = false;
+        t.trip = null;
+        label = "Estacionou o trator e voltou ao comando da colheitadeira.";
         break;
       }
       case "harvestRow":
@@ -1696,7 +1800,7 @@
     try {
       for (const event of commands) {
         const args = event.type === "sign" ? { ...event.args, mode } : event.args;
-        apply(alt, event.type, args);
+        apply(alt, event.type, args, event);
       }
       const r = report(alt);
       return {
@@ -1746,7 +1850,7 @@
         (r) => r.amount,
       ),
     );
-    const stockValue = money(sum(s.plots, (p) => (p.stocks + (p.combine?.loadSc || 0)) * (p.crop ? market(s, p.crop).price : 0)));
+    const stockValue = money(sum(s.plots, (p) => (p.stocks + (p.combine?.loadSc || 0) + (p.combine?.trailer?.loadSc || 0)) * (p.crop ? market(s, p.crop).price : 0)));
     const revenue = money(sum(s.sales, (sale) => sale.gross)),
       freight = money(sum(s.sales, (sale) => sale.freight));
     const operating = money(sum(s.ledger, (e) => e.expense));
@@ -2044,7 +2148,7 @@
       );
       check((marketStorage.enabled(s) || s.plots.every((p) => !p.combine)) &&
         s.plots.filter((p) => p.combine?.trailer).length <= 1 &&
-        !s.plots.some((p) => p.combine?.loadSc > 0 && ["accounts", "closed"].includes(s.stage)),
+        !s.plots.some((p) => (p.combine?.loadSc > 0 || p.combine?.trailer?.loadSc > 0) && ["accounts", "closed"].includes(s.stage)),
         "Posição da carreta ou carga pendente inválida.");
     }
     check(
@@ -2234,6 +2338,8 @@
     harvestedArea,
     harvestCost,
     combineStatus,
+    tractorRoute,
+    silo,
     report,
     planPrice,
     phenology,

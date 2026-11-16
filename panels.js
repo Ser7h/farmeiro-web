@@ -177,8 +177,12 @@ function startPanel() {
 function calendarPanel() {
   const day = s.day,
     ready = s.plots.filter((p) => p.area && !p.harvested && p.phase === "Maduro");
-  const loaded = s.plots.filter(p => p.harvested && p.combine?.loadSc > 0)
-    .map(p => `<div class="callout">${esc(p.name)} · ${sacks(p.combine.loadSc)} no graneleiro. ${btn("cabine", "Descarregar na cabeceira", "tractor", "secondary", p.id)}</div>`).join("");
+  const loaded = s.plots.filter(p => hasTransport(p) || (p.harvested && p.combine?.loadSc > 0))
+    .map(p => {
+      const transport = hasTransport(p);
+      const cargo = transport ? sacks(p.combine.trailer.loadSc || 0) + " na carreta" : sacks(p.combine.loadSc) + " no graneleiro";
+      return `<div class="callout">${esc(p.name)} · ${cargo}. ${btn("cabine", transport ? transportAction(p) : "Transferir para a carreta", "tractor", "secondary", p.id)}</div>`;
+    }).join("");
   openModal(
     "calendar",
     "Calendário da fazenda",
@@ -259,18 +263,20 @@ function harvestPanel(id) {
   const p = s.plots.find((x) => x.id === id);
   const remaining = p.area - Farm.harvestedArea(p);
   const load = p.combine?.loadSc || 0;
-  const label = p.harvested ? "Descarregar a última carga" : remaining < p.area ? "Continuar na cabine" : "Entrar na colheitadeira";
-  const team = p.harvested ? "" : btn("harvest-go", "Colher com a equipe", "field", "secondary", id);
+  const trailerLoad = p.combine?.trailer?.loadSc || 0;
+  let label = p.harvested ? "Transferir a última carga" : remaining < p.area ? "Continuar na cabine" : "Entrar na colheitadeira";
+  if (hasTransport(p)) label = transportAction(p);
+  const team = p.harvested ? "" : btn("harvest-go", "Colher e entregar com a equipe", "field", "secondary", id);
   const loss = p.harvested ? "" : btn("loss-review", "Dar baixa na área restante", "", "text-btn", id);
   openModal(
     "harvest",
     `Colheita do ${p.name}`,
-    `${p.harvested ? "" : kv("Área por colher", sackNumber.format(remaining) + " ha") + kv("Custo para concluir", brl(Farm.harvestCost(p)))}${load > 0 ? kv("No graneleiro", sacks(load)) : ""}${p.stocks > 0 ? kv("No estoque do talhão", sacks(p.stocks)) : ""}${kv("Caixa disponível", brl(s.cash))}<div class="row">${FarmMarket.enabled(s) && (!p.harvested || load > 0) ? btn("cabine", label, "tractor", "primary", id) : ""}${team}${p.stocks > 0 ? btn("sale", "Vender o que descarreguei", "truck", "secondary", id) : ""}${loss}</div>`,
+    `${p.harvested ? "" : kv("Área por colher", sackNumber.format(remaining) + " ha") + kv("Custo para concluir", brl(Farm.harvestCost(p)))}${load > 0 ? kv("No graneleiro", sacks(load)) : ""}${trailerLoad > 0 ? kv("Na carreta", sacks(trailerLoad)) : ""}${kv("Entregue no silo e disponível", sacks(p.stocks || 0))}${kv("Caixa disponível", brl(s.cash))}<div class="row">${FarmMarket.enabled(s) && hasFieldOperation(p) ? btn("cabine", label, "tractor", "primary", id) : ""}${team}${p.stocks > 0 ? btn("sale", "Vender estoque do silo", "truck", "secondary", id) : ""}${loss}</div>`,
   );
 }
-function openCombine(id) {
+function openCombine(id, inicioDoCenario = false) {
   const plot = s.plots.find(p => p.id === id);
-  if (!plot || !FarmMarket.enabled(s) || (plot.phase !== "Maduro" && !(plot.combine?.loadSc > 0))) {
+  if (!plot || !FarmMarket.enabled(s) || !hasFieldOperation(plot)) {
     throw Error("A cabine fica disponível quando o talhão amadurece nesta edição da safra.");
   }
   dismiss();
@@ -285,16 +291,21 @@ function openCombine(id) {
     return status();
   }
   window.FarmeiroCabine.abrir({
+    inicioDoCenario,
     nome: plot.name, cultura: plot.crop, areaHa: plot.area, faixas: Farm.harvestRows,
     chave: [s.seed, s.property, id, plot.crop, plot.actualSowDay, inSideTrip].join("."),
     status,
     onCortar: (row, cell) => operate("cutCell", { row, cell }),
     onChamar: (side) => operate("callTrailer", { side, now: Date.now() }),
-    onDescarregar: (side, speedKmh) => operate("unloadTrailer", { side, speedKmh, now: Date.now() }),
+    onDescarregar: (side, speedKmh, x) => operate("unloadTrailer", { side, speedKmh, x, now: Date.now() }),
+    onEntrarTrator: (side, speedKmh, x) => operate("boardTractor", { side, speedKmh, x, now: Date.now() }),
+    onMoverTrator: (distance, lateral) => operate("moveTractor", { distance, lateral }),
+    onDescarregarSilo: speedKmh => operate("unloadSilo", { speedKmh }),
+    onEntrarColheitadeira: speedKmh => operate("parkTractor", { speedKmh }),
     onSair() {
       const current = getPlot();
       render();
-      if (current.harvested && !current.combine?.loadSc && current.stocks > 0) salePanel(id);
+      if (!hasFieldOperation(current) && current.stocks > 0) salePanel(id);
       else harvestPanel(id);
     },
   });
@@ -370,8 +381,11 @@ function salePanel(id) {
   const chooser = enabled
     ? `<label class="form-label">Quantidade a vender (sc de 60 kg)<input id="sale-quantity" type="number" min="0.001" max="${plot.stocks}" step="0.001" required value="${plot.stocks}"></label><div class="row" id="sale-shares">${[25, 50, 100].map((value) => `<button class="secondary" type="button" data-share="${value}">${value}% do estoque</button>`).join("")}</div><p id="sale-balance" aria-live="polite" class="footnote"></p>`
     : "";
-  const inCombine = plot.combine?.loadSc > 0
-    ? `<p class="footnote">Ainda há ${sacks(plot.combine.loadSc)} na colheitadeira. ${btn("cabine", "Voltar à cabine", "tractor", "text-btn", id)}</p>` : "";
+  const fieldLoads = [];
+  if (plot.combine?.loadSc > 0) fieldLoads.push(sacks(plot.combine.loadSc) + " no graneleiro");
+  if (plot.combine?.trailer?.loadSc > 0) fieldLoads.push(sacks(plot.combine.trailer.loadSc) + " na carreta");
+  const inCombine = fieldLoads.length
+    ? `<p class="footnote">Por entregar ao silo: ${fieldLoads.join(" e ")}. ${btn("cabine", "Retomar a operação", "tractor", "text-btn", id)}</p>` : "";
   openModal(
     "sale",
     `Venda do ${plot.name}`,

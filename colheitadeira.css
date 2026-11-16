@@ -101,6 +101,9 @@
 .cab-teclas { flex: 1 1 100%; color: #c9d0bd; font-size: 12px; }
 .cab-pedais button { user-select: none; -webkit-user-select: none; touch-action: none; min-width: 42px; padding: 8px; }
 .cab-pedais button[data-move="gas"] { border-color: #c3d190; }
+.cab-pedais button.cab-curva { border-color: #f6ca80; background: #5b482a; color: #fff0d0; }
+.cabine-farmeiro[data-veiculo="trator"] .cab-radio-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 12px; }
+.cabine-farmeiro[data-veiculo="trator"] [data-led="trajeto"] { color: #f0e9a6; }
 .cabine-farmeiro [data-acionado="sim"] { background: #587241; }
 @media (min-width: 1100px) { .cab-painel { justify-content: flex-start; } .cab-pedais { margin-left: auto; } }
 @media (min-width: 721px) {
@@ -125,6 +128,8 @@
   .cabine-farmeiro button { font-size: 12px; min-height: 40px; padding: 6px 8px; }
 }
 @media (max-width: 450px) {
+  .cabine-farmeiro[data-veiculo="trator"] .cab-instrumentos > div:nth-child(2),
+  .cabine-farmeiro[data-veiculo="trator"] .cab-graneleiro { display: none; }
   .cab-acoes, .cab-pedais { justify-content: space-between; }
   .cab-acoes { flex: 1 1 100%; } .cab-acoes button { flex: 1; }
   .cab-pedais { flex: 1 1 100%; } .cab-pedais button { flex: 1; min-height: 44px; }
