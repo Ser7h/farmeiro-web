@@ -1561,3 +1561,7 @@ td.number {
     scroll-margin-bottom: 68px;
   }
 }
+.cargo-map { position: relative; overflow: hidden; height: clamp(140px, 25vh, 220px); border-radius: 8px; background: #746b48; }
+.cargo-map-terrain { position: absolute; background: url("assets/mapa.webp") center / 100% 100%; }
+.cargo-pin { position: absolute; transform: translate(-50%, -50%); display: flex; gap: 4px; align-items: center; white-space: nowrap; padding: 6px 8px; border: 2px solid #fff; border-radius: 6px; background: #fffdf4; color: #1b3327; font: inherit; font-weight: 700; cursor: pointer; }
+.cargo-pin[aria-pressed="true"] { background: #234835; color: white; }

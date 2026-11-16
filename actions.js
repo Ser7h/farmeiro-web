@@ -7,7 +7,7 @@ function guidePanel() {
 <div class="mini-card"><h4>Conheça a terra</h4><p>Selecione uma sede no mapa. Compare a fala do vendedor com a visita independente e, se fizer sentido, encomende o laudo. A aba Proposta mostra o que sobra no caixa.</p></div>
 <div class="mini-card"><h4>Planeje antes de semear</h4><p>Escolha pelo menos um talhão, área, cultura, ciclo e quantidade de insumos. A patrulha contratada só começa em 9 de outubro; o conjunto próprio trabalha mais cedo e cria outra dívida.</p></div>
 <div class="mini-card"><h4>Leia o calendário</h4><p>O relógio para entre as decisões. Aproxime o mapa com + e arraste para percorrer a propriedade. Toque no raio para ler o boletim. A equipe pode esperar o solo firmar ou entrar em condição marginal. Essa escolha muda a data de semeadura e o estado do solo.</p></div>
-<div class="mini-card"><h4>Colha, venda e acerte as contas</h4><p>Ao amadurecer, cada talhão vai para estoque. Venda apenas as sacas necessárias, compare prazo e frete e acompanhe o restante no depósito. Cada noite de espera custa tarifa e pode reduzir a quantidade disponível.</p></div>
+<div class="mini-card"><h4>Colha, venda e acerte as contas</h4><p>Quando o talhão amadurecer, assuma a cabine ou mande a equipe colher. Cada faixa concluída entra no estoque. Venda apenas as sacas necessárias, compare prazo e frete e acompanhe o restante no depósito. Cada noite de espera custa tarifa e pode reduzir a quantidade disponível.</p></div>
 ${storyShelf()}<h3>Missão da Grota</h3><p>Comece no dia do alerta, com milho em florescimento na Grota, milho vegetativo no Alto e 1.000 m³ para um turno. Sua campanha fica guardada enquanto você compara decisões.</p><div class="row">${btn("mission-review", "Abrir missão climática", "bolt", "primary")}${btn("technical", "Ficha do cenário", "file", "secondary")}${btn("audio", sound ? "Desligar ambiente" : "Ouvir ambiente", sound ? "mute" : "sound", "text-btn")}</div>`,
   );
 }
@@ -306,8 +306,8 @@ function dispatch(action, id = "") {
       const ready = s.plots.find((p) => (p.phase === "Maduro" && !p.harvested) || p.stocks > 0);
       if (ready) {
         jumpPlot(ready.id);
-        if (ready.stocks > 0) salePanel(ready.id);
-        else harvestPanel(ready.id);
+        if (ready.phase === "Maduro" && !ready.harvested) harvestPanel(ready.id);
+        else salePanel(ready.id);
         break;
       }
       if (s.stage === "accounts" && s.day >= 180 && s.receivables.every((r) => r.paid)) {
@@ -379,14 +379,23 @@ function dispatch(action, id = "") {
     case "harvest":
       harvestPanel(id);
       break;
+    case "cabine":
+      openCombine(id);
+      break;
+    case "escoamento":
+      loadingPanel(id);
+      break;
+    case "montar-ponto":
+      if (perform("buildLoadingBay", { id }, "Ponto de carga montado.")) loadingPanel(id);
+      break;
     case "harvest-go":
       if (done("harvest", { id }, "Produção registrada no estoque.")) salePanel(id);
       break;
     case "loss-review":
       openModal(
         "loss",
-        "Reconhecer perda integral",
-        `<p>Registrar a perda encerra a colheita deste talhão com estoque zero.</p><div class="row">${btn("loss", "Registrar perda", "field", "danger", id)}${btn("dismiss", "Manter a lavoura")}</div>`,
+        "Dar baixa na área restante",
+        `<p>Dar baixa encerra a colheita da área ainda em pé. Os grãos já recolhidos permanecem no lote.</p><div class="row">${btn("loss", "Registrar perda", "field", "danger", id)}${btn("dismiss", "Manter a lavoura")}</div>`,
       );
       break;
     case "loss":
@@ -609,6 +618,10 @@ function startGame() {
   if (saveError) notify(saveError);
   render();
   mapSize();
+  if (location.hash === "#colheita") {
+    history.replaceState(null, "", location.pathname + location.search);
+    storyReview("colheita");
+  }
 }
 if (hostedGame) {
   const shell = $("shell");
@@ -623,5 +636,7 @@ if (hostedGame) {
   } else $("top").textContent = "O acesso à conta não carregou. Atualize esta página.";
 } else if (pagesGame && !pagesProfile) {
   $("shell").hidden = true;
-  location.replace(new URL("./", document.baseURI));
+  const entry = new URL("./", document.baseURI);
+  if (location.hash === "#colheita") entry.hash = "colheita";
+  location.replace(entry);
 } else startGame();

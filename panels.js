@@ -255,11 +255,37 @@ function probePanel(id) {
 }
 function harvestPanel(id) {
   const p = s.plots.find((x) => x.id === id);
+  const remaining = p.area - Farm.harvestedArea(p);
+  const label = p.harvestRows?.length ? "Continuar na cabine" : "Entrar na colheitadeira";
   openModal(
     "harvest",
     `Colheita do ${p.name}`,
-    `${kv("Área madura", fmt(p.area) + " ha")}${kv("Custo da colheita", brl(165 * p.area))}${kv("Caixa disponível", brl(s.cash))}<div class="row">${btn("harvest-go", "Colher e estocar", "tractor", "primary", id)}${btn("loss-review", "Registrar perda integral", "", "text-btn", id)}</div>`,
+    `${kv("Área por colher", sackNumber.format(remaining) + " ha")}${kv("Custo para concluir", brl(Farm.harvestCost(p)))}${kv("Caixa disponível", brl(s.cash))}<div class="row">${FarmMarket.enabled(s) ? btn("cabine", label, "tractor", "primary", id) : ""}${btn("harvest-go", "Colher com a equipe", "field", "secondary", id)}${p.stocks > 0 ? btn("sale", "Vender o que já colhi", "truck", "secondary", id) : ""}${btn("loss-review", "Dar baixa na área restante", "", "text-btn", id)}</div>`,
   );
+}
+function openCombine(id) {
+  const plot = s.plots.find(p => p.id === id);
+  if (!plot || plot.harvested || plot.phase !== "Maduro" || !FarmMarket.enabled(s)) {
+    throw Error("A cabine fica disponível quando o talhão amadurece nesta edição da safra.");
+  }
+  dismiss();
+  const getPlot = () => s.plots.find(p => p.id === id);
+  window.FarmeiroCabine.abrir({
+    nome: plot.name, cultura: plot.crop, areaHa: plot.area, faixas: Farm.harvestRows,
+    concluidas: plot.harvestRows || [], estoqueSc: plot.stocks || 0,
+    onFaixa(row) {
+      s = Farm.act(s, "harvestRow", { id, row });
+      save();
+      render();
+      const current = getPlot();
+      return { concluidas: current.harvestRows, estoqueSc: current.stocks };
+    },
+    onSair() {
+      const current = getPlot();
+      if (current.harvested && current.stocks > 0) salePanel(id);
+      else harvestPanel(id);
+    },
+  });
 }
 function saleQuantityArgs() {
   const input = document.getElementById("sale-quantity");
@@ -291,7 +317,7 @@ function saleTerms(plot, market, args, warehouseEnabled) {
             gross: Math.round(price * plot.stocks * 100) / 100,
           };
       const net = sale.net ?? sale.gross - sale.freight;
-      return `<div class="mini-card"><h4>${title}</h4>${kv("Preço por saca", brl(price))}${kv("Receita bruta", brl(sale.gross))}${kv("Frete total", brl(sale.freight))}${sale.storageFee ? kv("Tarifa retida", brl(sale.storageFee)) : ""}${kv("Valor líquido", brl(net))}${kv("Pagamento", Farm.date(payDay))}${btn("sell", atTerm ? "Vender e criar recebível" : "Vender e receber", "truck", "primary", plot.id + "-" + terms)}</div>`;
+      return `<div class="mini-card"><h4>${title}</h4>${kv("Preço por saca", brl(price))}${kv("Receita bruta", brl(sale.gross))}${sale.bayUnits ? kv("Via ponto de carga", sacks(sale.bayUnits)) : ""}${kv("Frete total", brl(sale.freight))}${sale.storageFee ? kv("Tarifa retida", brl(sale.storageFee)) : ""}${kv("Valor líquido", brl(net))}${kv("Pagamento", Farm.date(payDay))}${btn("sell", atTerm ? "Vender e criar recebível" : "Vender e receber", "truck", "primary", plot.id + "-" + terms)}</div>`;
     })
     .join("");
 }
@@ -335,7 +361,7 @@ function salePanel(id) {
   openModal(
     "sale",
     `Venda do ${plot.name}`,
-    `<p class="intro">${sacks(plot.stocks)} de 60 kg de ${plot.crop} em estoque. Oferta do comprador em ${Farm.date(s.day)}.</p>${kv("Preço à vista hoje", brl(currentPrice) + "/sc")}${kv("Frete", brl(market.freight) + "/sc")}${obligation}${chooser}<div id="sale-offers">${saleTerms(plot, market, {}, enabled)}</div>${enabled ? storagePanel(plot, market) : ""}`,
+    `<p class="intro">${sacks(plot.stocks)} de 60 kg de ${plot.crop} em estoque. Oferta do comprador em ${Farm.date(s.day)}.</p>${kv("Preço à vista hoje", brl(currentPrice) + "/sc")}${kv("Frete direto", brl(market.freight) + "/sc")}${enabled ? btn("escoamento", s.loadingBay ? "Ver ponto de carga" : "Planejar ponto de carga", "truck", "secondary", id) : ""}${obligation}${chooser}<div id="sale-offers">${saleTerms(plot, market, {}, enabled)}</div>${enabled ? storagePanel(plot, market) : ""}`,
   );
   if (!enabled) return;
   const input = document.getElementById("sale-quantity");

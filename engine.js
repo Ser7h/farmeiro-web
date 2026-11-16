@@ -14,6 +14,7 @@
       : root.FarmClimate;
   }
   const CAPITAL = 350000;
+  const harvestRows = 8;
   const DUE = 180,
     PEAK = 65;
   const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -663,6 +664,63 @@
       2,
     );
   }
+  function harvestedArea(p) {
+    if (p.harvestRows) return (p.area * p.harvestRows.length) / harvestRows;
+    return p.harvested && !p.lost ? p.area : 0;
+  }
+  function harvestCost(p, targetArea = p.area) {
+    return money(money(165 * targetArea) - money(165 * harvestedArea(p)));
+  }
+  function validHarvestRows(p, day) {
+    if (p.harvestRows === undefined) {
+      return p.harvested || (p.harvestDay == null && !p.production && !p.stocks);
+    }
+    const rows = p.harvestRows;
+    return (
+      Array.isArray(rows) && rows.length > 0 && rows.length <= harvestRows &&
+      new Set(rows).size === rows.length &&
+      rows.every((row) => Number.isInteger(row) && row >= 0 && row < harvestRows) &&
+      p.crop && p.area > 0 && Number.isInteger(p.matureDay) && Number.isInteger(p.harvestDay) &&
+      p.harvestDay >= p.matureDay && p.harvestDay <= day &&
+      p.harvested === (p.lost === true || rows.length === harvestRows)
+    );
+  }
+  function harvestCrop(s, p, row, manual) {
+    check(
+      p.crop && !p.harvested && p.matureDay !== null && s.day >= p.matureDay,
+      "O talhão ainda não está pronto para colheita.",
+    );
+    const previousRows = p.harvestRows || [];
+    if (manual) {
+      check(Number.isInteger(row) && row >= 0 && row < harvestRows, "Faixa de colheita inválida.");
+      check(!previousRows.includes(row), "Esta faixa já foi colhida.");
+    }
+    const rows = manual ? [row] : Array.from({ length: harvestRows }, (_, i) => i)
+      .filter((index) => !previousRows.includes(index));
+    const cutArea = (p.area * rows.length) / harvestRows;
+    const coveredArea = (p.area * (previousRows.length + rows.length)) / harvestRows;
+    const charge = harvestCost(p, coveredArea);
+    spend(s, "Colheita · " + p.name, charge);
+    const rate = yieldFor({ ...p, harvestDay: s.day });
+    // Atribui milésimos inteiros a cada faixa, somando o mesmo lote em qualquer ordem.
+    const boundary = (i) => Math.round((p.area * rate * i / harvestRows) * 1000);
+    const units = sum(rows, (i) => boundary(i + 1) - boundary(i)) / 1000;
+    marketStorage.receiveHarvest(s, p, units);
+    p.harvestDay ??= s.day;
+    p.production = round(p.production + units, 3);
+    p.yieldSc = previousRows.length ? round(p.production / coveredArea) : rate;
+    if (manual || previousRows.length) p.harvestRows = [...previousRows, ...rows].sort((a, b) => a - b);
+    if (previousRows.length + rows.length === harvestRows) {
+      p.harvested = true;
+      p.phase = "Colhido";
+      p.soilChange += p.operation === "direta" ? 0.012 : -0.025;
+    }
+    return {
+      label: "Colheu " + units.toLocaleString("pt-BR") + " sc de 60 kg em " +
+        cutArea.toLocaleString("pt-BR", { maximumFractionDigits: 3 }) + " ha no " + p.name + ".",
+      detail: { id: p.id, yieldSc: rate, kg: round(units * 60), stress: round(p.stress, 3) },
+    };
+  }
   function market(s, crop) {
     check(["soja", "milho"].includes(crop), "Escolha soja ou milho.");
     const price = round(
@@ -915,12 +973,23 @@
       "preserve",
       "sell",
       "fieldPolicy",
+      "buildLoadingBay",
     ].includes(type)
       ? snapshot(s)
       : null;
     let label,
       detail = {};
     switch (type) {
+      case "buildLoadingBay": {
+        check(marketStorage.enabled(s) && s.property && ["plan", "season", "harvest"].includes(s.stage),
+          "O ponto de carga exige terra contratada e uma safra aberta nesta edição.");
+        check(!s.loadingBay, "A fazenda já tem um ponto de carga nesta safra.");
+        const plot = plotBy(s, pId);
+        spend(s, "Montagem do ponto de carga · " + plot.name, marketStorage.loadingTerms.cost, "loadingBay");
+        s.loadingBay = { plotId: plot.id, day: s.day };
+        label = "Montou o ponto de carga no " + plot.name + ".";
+        break;
+      }
       case "visit":
       case "lab":
       case "negotiate":
@@ -1336,29 +1405,10 @@
         label = "Implantou cobertura no " + p.name + " para proteger o solo.";
         break;
       }
+      case "harvestRow":
       case "harvest": {
         const p = plotBy(s, pId);
-        check(
-          p.crop && !p.harvested && p.matureDay !== null && s.day >= p.matureDay,
-          "O talhão ainda não está pronto para colheita.",
-        );
-        spend(s, "Colheita · " + p.name, 165 * p.area);
-        p.harvestDay = s.day;
-        p.yieldSc = yieldFor(p);
-        p.production = round(p.area * p.yieldSc, 3);
-        p.stocks = p.production;
-        p.harvested = true;
-        p.phase = "Colhido";
-        p.soilChange += p.operation === "direta" ? 0.012 : -0.025;
-        label =
-          "Colheu " +
-          p.production.toLocaleString("pt-BR") +
-          " sc de 60 kg em " +
-          p.area +
-          " ha no " +
-          p.name +
-          ".";
-        detail = { id: p.id, yieldSc: p.yieldSc, kg: round(p.production * 60), stress: round(p.stress, 3) };
+        ({ label, detail } = harvestCrop(s, p, a.row, type === "harvestRow"));
         break;
       }
       case "sell": {
@@ -1434,10 +1484,11 @@
         );
         p.harvested = true;
         p.lost = true;
-        p.harvestDay = s.day;
+        p.harvestDay ??= s.day;
         p.phase = "Perdido";
-        label =
-          "Reconheceu perda integral do " + p.name + ". A área planejada ficou sem colheita nem estoque.";
+        label = p.harvestRows?.length
+          ? "Reconheceu a perda das faixas restantes no " + p.name + ". A produção já colhida foi preservada."
+          : "Reconheceu perda integral do " + p.name + ". A área planejada ficou sem colheita nem estoque.";
         break;
       }
       case "close": {
@@ -1553,12 +1604,7 @@
         sum(s.plots, (p) => p.production),
         3,
       ),
-      harvestedArea = round(
-        sum(
-          s.plots.filter((p) => p.harvested && !p.lost),
-          (p) => p.area,
-        ),
-      );
+      totalHarvestedArea = round(sum(s.plots, harvestedArea), 3);
     const required = money(Math.max(12000, sum(s.plots, (p) => p.committed) * 0.8));
     const current = s.debts.every((d) => !d.late);
     const continuity = s.stage === "closed" && current && s.cash >= required;
@@ -1615,7 +1661,7 @@
       stockValue,
       warehouse,
       production,
-      harvestedArea,
+      harvestedArea: totalHarvestedArea,
       soil,
       decision,
       decisionIndex: pick.index,
@@ -1827,6 +1873,7 @@
                 (v) => Number.isFinite(v) && v >= 0,
               ) &&
               p.area <= q.ha &&
+              validHarvestRows(p, s.day) &&
               phases.includes(p.phase) &&
               [null, "milho", "soja"].includes(p.crop) &&
               ["direta", "convencional"].includes(p.operation) &&
@@ -1880,7 +1927,7 @@
         }),
       "Ponto de retorno de campo inválido.",
     );
-    marketStorage.validate(s);
+    marketStorage.validate(s, market);
   }
   function validFieldState(p, s) {
     const reading = p.fieldReading;
@@ -2019,6 +2066,9 @@
     forecast,
     traffic,
     market,
+    harvestRows,
+    harvestedArea,
+    harvestCost,
     report,
     planPrice,
     phenology,

@@ -3,6 +3,7 @@
   "use strict";
   // Valores do contrato fictício de depósito da primeira campanha, por saca de 60 kg.
   const conditions = Object.freeze({ dailyFee: 0.02, dailyLossRate: 0.00012 });
+  const loadingTerms = Object.freeze({ cost: 360, capacity: 120, nearDiscount: 1.8, farDiscount: 0.8 });
   const enabled = (state) => state.version === "farmeiro-safra/1.1.0";
   const cents = (value) => Math.round((value + Number.EPSILON) * 100);
   const millisacks = (value) => Math.round(value * 1000);
@@ -36,13 +37,20 @@
   function accrueDay(state) {
     if (!enabled(state)) return;
     for (const plot of state.plots) {
-      if (!plot.harvested || plot.stocks <= 0 || state.day <= plot.harvestDay) continue;
+      if (plot.harvestDay === null || plot.stocks <= 0 || state.day <= plot.harvestDay) continue;
       const account = plot.warehouse || (plot.warehouse = emptyAccount(plot.harvestDay));
       while (account.lastDay < state.day && plot.stocks > 0) {
         plot.stocks = accrueNight(account, plot.stocks);
         account.lastDay++;
       }
     }
+  }
+  function receiveHarvest(state, plot, units) {
+    if (enabled(state) && plot.stocks === 0 && plot.harvestDay !== null && state.day > plot.harvestDay) {
+      const account = plot.warehouse || (plot.warehouse = emptyAccount(state.day));
+      account.lastDay = state.day;
+    }
+    plot.stocks = (millisacks(plot.stocks) + millisacks(units)) / 1000;
   }
   function selectedQuantity(plot, requested) {
     const units = requested === undefined ? plot.stocks : requested;
@@ -54,6 +62,19 @@
       "Informe uma quantidade positiva, com até três casas decimais, dentro do estoque disponível.",
     );
     return units;
+  }
+  function loadingRemaining(state, day = state.day) {
+    if (!state.loadingBay || day < state.loadingBay.day) return 0;
+    const used = state.sales.reduce(
+      (total, sale) => sale.day === day ? total + millisacks(sale.bayUnits ?? 0) : total,
+      0,
+    );
+    return Math.max(0, millisacks(loadingTerms.capacity) - used) / 1000;
+  }
+  function freightCharge(state, plotId, units, bayUnits, freightPerUnit) {
+    if (!bayUnits) return cents(units * freightPerUnit);
+    const discount = plotId === state.loadingBay.plotId ? loadingTerms.nearDiscount : loadingTerms.farDiscount;
+    return Math.round((millisacks(units) * cents(freightPerUnit) - millisacks(bayUnits) * cents(discount)) / 1000);
   }
   function quote(state, plot, args, market) {
     requireThat(enabled(state), "Venda parcial indisponível nesta edição da campanha.");
@@ -68,7 +89,8 @@
     const openCents = account ? account.feeCents - account.retainedCents : 0;
     // No último lote o armazém retém todo o saldo, inclusive sobra de rateio.
     const retainedCents = units === plot.stocks ? openCents : Math.round((openCents * units) / plot.stocks);
-    const freightCents = cents(units * market.freight);
+    const bayUnits = Math.min(units, loadingRemaining(state));
+    const freightCents = freightCharge(state, plot.id, units, bayUnits, market.freight);
     const grossCents = cents(units * price);
     return {
       saleId: "V" + (state.sales.length + 1),
@@ -77,6 +99,7 @@
       crop: plot.crop,
       area: plot.area,
       units,
+      ...(state.loadingBay ? { bayUnits } : {}),
       price,
       gross: grossCents / 100,
       freight: freightCents / 100,
@@ -127,7 +150,9 @@
     const additionalFee = (account.feeCents - (plot.warehouse?.feeCents || 0)) / 100;
     const open = (account.feeCents - account.retainedCents) / 100;
     // Menor cotação, em centavos inteiros por saca, cujo líquido empata com vender hoje.
-    const targetGrossCents = cents(spot.net) + cents(open) + cents(stock * market.freight);
+    const futureBayUnits = Math.min(stock, loadingRemaining(state, state.day + days));
+    const targetGrossCents = cents(spot.net) + cents(open) +
+      freightCharge(state, plot.id, stock, futureBayUnits, market.freight);
     let requiredPrice = null;
     if (stock > 0) {
       let priceCents = Math.max(0, Math.ceil((targetGrossCents - 0.5) / stock - 1e-9));
@@ -160,7 +185,53 @@
     }
     return { units: low / 1000, remainingGap: 0 };
   }
-  function validate(state) {
+  function validateLoadingBay(state, marketFor) {
+    const installations = state.history.filter((event) => event.type === "buildLoadingBay");
+    const debits = state.ledger.filter((entry) => entry.kind === "loadingBay");
+    const site = state.loadingBay;
+    if (site === undefined) {
+      requireThat(
+        installations.length === 0 && debits.length === 0 && state.sales.every((sale) => sale.bayUnits === undefined),
+        "A movimentação menciona um ponto de carga ausente.",
+      );
+      return;
+    }
+    requireThat(
+      site && enabled(state) && state.property && state.stage !== "visit" &&
+        state.plots.some((plot) => plot.id === site.plotId) &&
+        Number.isInteger(site.day) && site.day >= 0 && site.day <= state.day &&
+        installations.length === 1 && installations[0].day === site.day && installations[0].args?.id === site.plotId &&
+        debits.length === 1 && debits[0].day === site.day &&
+        debits[0].amount === -loadingTerms.cost && debits[0].expense === loadingTerms.cost,
+      "Instalação ou custo do ponto de carga inconsistente.",
+    );
+    // Vendas anteriores à montagem, inclusive na própria data, usavam a rota direta.
+    const installIndex = state.history.indexOf(installations[0]);
+    const priorSales = state.history.slice(0, installIndex).filter((event) => event.type === "sell").length;
+    const usedByDay = new Map();
+    for (const [index, sale] of state.sales.entries()) {
+      if (index < priorSales) {
+        requireThat(sale.day <= site.day && sale.bayUnits === undefined, "Frete anterior à montagem inconsistente.");
+        continue;
+      }
+      const used = usedByDay.get(sale.day) || 0;
+      const expected = Math.min(millisacks(sale.units), millisacks(loadingTerms.capacity) - used);
+      requireThat(
+        Number.isInteger(sale.day) && sale.day >= site.day && sale.day <= state.day &&
+          state.plots.some((plot) => plot.id === sale.id && plot.crop === sale.crop) &&
+          sale.bayUnits === expected / 1000,
+        "Volume ou data da expedição pelo ponto de carga inconsistente.",
+      );
+      const rate = marketFor(state, sale.crop).freight;
+      requireThat(
+        sale.freight === freightCharge(state, sale.id, sale.units, sale.bayUnits, rate) / 100,
+        "Frete do ponto de carga inconsistente.",
+      );
+      usedByDay.set(sale.day, used + expected);
+    }
+  }
+  function validate(state, marketFor = root.Farm?.market) {
+    validateLoadingBay(state, marketFor);
     if (!enabled(state)) return;
     requireThat(
       state.sales.every((sale, index) => sale.saleId === "V" + (index + 1)),
@@ -198,7 +269,7 @@
       );
       if (account) {
         requireThat(
-          plot.harvested &&
+          Number.isInteger(plot.harvestDay) &&
             Number.isInteger(account.lastDay) &&
             account.lastDay >= plot.harvestDay &&
             account.lastDay <= state.day &&
@@ -226,7 +297,10 @@
   const api = {
     enabled,
     conditions,
+    loadingTerms,
+    loadingRemaining,
     accrueDay,
+    receiveHarvest,
     quote,
     sellLot,
     summary,

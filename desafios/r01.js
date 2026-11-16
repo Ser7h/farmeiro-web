@@ -3,6 +3,12 @@
   const node = typeof module !== "undefined" && module.exports;
   const F = node ? require("../engine.js") : root.Farm;
   const descriptions = {
+    colheita: {
+      name: "Dirigir a colheitadeira",
+      location: "Alto da Santa Helena",
+      text: "A soja amadureceu. Assuma a cabine, baixe a plataforma e colha a primeira faixa do Alto. Depois escolha onde embarcar os grãos.",
+      icon: "tractor",
+    },
     passagem: {
       name: "A máquina entra?",
       location: "Grota da Boa Vista",
@@ -18,7 +24,7 @@
   };
   function reference(key) {
     const pass = key === "passagem";
-    if (!pass && key !== "deposito") throw Error("Desafio desconhecido.");
+    if (!Object.hasOwn(descriptions, key)) throw Error("Desafio desconhecido.");
     let state = F.create(17, F.VERSION, pass ? "power-2023" : "power-2022");
     const go = (action, args = {}) => {
       state = F.act(state, action, args);
@@ -44,6 +50,7 @@
         go("fieldPolicy", { id: plotId, policy: "press" });
       }
       if (plot.phase === "Maduro" && !plot.harvested) {
+        if (key === "colheita") return F.challenge(state);
         go("harvest", { id: plotId });
         if (!pass) point = state.checkpoints.length;
         go("sell", { id: plotId, terms: "spot" });

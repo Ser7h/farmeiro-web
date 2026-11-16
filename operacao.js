@@ -172,6 +172,11 @@ function storyShelf() {
 function storyReview(id) {
   const item = FarmStories.descriptions[id];
   if (!item) return;
+  if (id === "colheita") {
+    openModal("story", esc(item.name),
+      `<p class="intro">${esc(item.location)} · 5 ha de soja madura</p><p>${esc(item.text)}</p><p class="footnote">Sua campanha fica guardada em Partida enquanto você joga este cenário.</p>${btn("story-go", "Entrar na cabine", "tractor", "primary", id)}`);
+    return;
+  }
   openModal(
     "story",
     esc(item.name),
@@ -185,6 +190,7 @@ function startStory(id) {
   plotId = id === "passagem" ? "grota" : "alto";
   save();
   render();
-  if (id === "passagem") trafficPanel(plotId);
+  if (id === "colheita") openCombine(plotId);
+  else if (id === "passagem") trafficPanel(plotId);
   else salePanel(plotId);
 }

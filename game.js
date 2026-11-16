@@ -169,6 +169,7 @@ function drawHeader() {
   $("rail").innerHTML =
     nav("map", "Mapa", "map", !modal) +
     nav("plots", "Talhões", "field", modal === "plots") +
+    (s.property && FarmMarket.enabled(s) ? nav("escoamento", "Escoamento", "truck", modal === "escoamento") : "") +
     nav("finance", "Caixa", "wallet", modal === "finance") +
     nav("journal", "Diário", "book", modal === "journal") +
     `<div class="rail-space"></div><div class="rail-divider"></div>` +
@@ -196,7 +197,8 @@ function mapUI() {
     $("pins").innerHTML = s.plots
       .map((p) => {
         const pos = plotPoint(off.id, p.id);
-        return pinButton("plot", p.id, p.name, pos, p.id === plotId, "sprout");
+        const isBay = p.id === s.loadingBay?.plotId;
+        return pinButton("plot", p.id, p.name + (isBay ? " · ponto de carga" : ""), pos, p.id === plotId, isBay ? "truck" : "sprout");
       })
       .join("");
   }
@@ -328,6 +330,11 @@ function drawField(t = 0) {
         cx.lineTo(i + 70, (y * H) / 100 + 80);
         cx.stroke();
       }
+    }
+    if (p.harvestRows?.length && !p.harvested) {
+      const band = ((right - left) * p.area) / (p.ha * Farm.harvestRows);
+      cx.fillStyle = "#875631cf";
+      for (const row of p.harvestRows) cx.fillRect(left + row * band, top, band, bottom - top);
     }
     cx.restore();
     if (p.area && !p.harvested && s.stage !== "plan" && s.stage !== "closed") {
@@ -471,7 +478,16 @@ function soilPanel(p) {
 }
 function seasonPanel(p, f) {
   const stock = Number(p.stocks) || 0;
-  return `${info("sprout", "Lavoura", p.crop ? `${p.area} ha de ${p.crop} · ${p.phase}` : "Talhão em pousio")}${info("water", "Reserva da propriedade", `${fmt(s.water)} m³ disponíveis`)}${p.crop ? info("calendar", trafficEnabled(p) && (p.workedHa || 0) < p.area ? "Semeadura prevista" : "Semeadura efetiva", Farm.date(p.actualSowDay ?? p.sowDay)) : ""}${f.level === "alto" ? `<div class="callout warm"><b>Alerta regional ${f.trend}</b><br>${esc(f.detail)} ${btn("climate", "Examinar previsão", "", "text-btn")}</div>` : ""}<div class="book-actions">${s.stage === "closed" ? cta("report", "Abrir balanço da safra") : stock > 0 ? cta("sale", "Vender estoque", p.id) : p.crop && !p.harvested && p.phase === "Maduro" ? cta("harvest", "Colher talhão", p.id) : s.stage === "accounts" ? cta("close-review", "Fechar safra") : cta("calendar", "Avançar calendário")}${fieldPolicyButton(p)}${s.stage !== "closed" && p.crop && !p.harvested ? btn("intervene", "Manejo e reserva", "water", "secondary", p.id) : ""}${btn("finance", "Consultar caixa", "wallet", "secondary")}${s.stage !== "closed" && s.day < 120 ? btn("consultants", "Consultar equipe", "person", "text-btn") : ""}${s.stage === "accounts" ? btn("calendar", "Ver calendário", "calendar", "secondary") : ""}</div>`;
+  const ready = p.crop && !p.harvested && p.phase === "Maduro";
+  let nextAction = cta("calendar", "Avançar calendário");
+  if (s.stage === "accounts") nextAction = cta("close-review", "Fechar safra");
+  if (stock > 0) nextAction = cta("sale", "Vender estoque", p.id);
+  if (ready) {
+    nextAction = cta("harvest", p.harvestRows?.length ? "Continuar colheita" : "Colher talhão", p.id);
+    if (stock > 0) nextAction += btn("sale", "Vender o que já colhi", "truck", "secondary", p.id);
+  }
+  if (s.stage === "closed") nextAction = cta("report", "Abrir balanço da safra");
+  return `${info("sprout", "Lavoura", p.crop ? `${p.area} ha de ${p.crop} · ${p.phase}` : "Talhão em pousio")}${info("water", "Reserva da propriedade", `${fmt(s.water)} m³ disponíveis`)}${p.crop ? info("calendar", trafficEnabled(p) && (p.workedHa || 0) < p.area ? "Semeadura prevista" : "Semeadura efetiva", Farm.date(p.actualSowDay ?? p.sowDay)) : ""}${f.level === "alto" ? `<div class="callout warm"><b>Alerta regional ${f.trend}</b><br>${esc(f.detail)} ${btn("climate", "Examinar previsão", "", "text-btn")}</div>` : ""}<div class="book-actions">${nextAction}${fieldPolicyButton(p)}${s.stage !== "closed" && p.crop && !p.harvested ? btn("intervene", "Manejo e reserva", "water", "secondary", p.id) : ""}${btn("finance", "Consultar caixa", "wallet", "secondary")}${s.stage !== "closed" && s.day < 120 ? btn("consultants", "Consultar equipe", "person", "text-btn") : ""}${s.stage === "accounts" ? btn("calendar", "Ver calendário", "calendar", "secondary") : ""}</div>`;
 }
 function openModal(name, title, body) {
   modal = name;
