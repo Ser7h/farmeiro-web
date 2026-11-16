@@ -6,7 +6,7 @@
     colheita: {
       name: "Dirigir a colheitadeira",
       location: "Alto da Santa Helena",
-      text: "A soja amadureceu. Assuma a cabine, baixe a plataforma e colha a primeira faixa do Alto. Depois escolha onde embarcar os grãos.",
+      text: "A soja amadureceu. Baixe a plataforma e comece a colher. Pelo rádio, mande a carreta esperar na cabeceira norte ou sul. Quando o graneleiro encher, dirija até ela e pare para descarregar.",
       icon: "tractor",
     },
     passagem: {

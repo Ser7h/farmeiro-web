@@ -15,6 +15,10 @@
   }
   const CAPITAL = 350000;
   const harvestRows = 8;
+  const cellsPerRow = 32;
+  const combineCapacity = 60; // Sacas de 60 kg, nesta máquina da campanha.
+  const trailerTravelMs = 5000;
+  const uncutRow = "0".repeat(cellsPerRow), cutRow = "1".repeat(cellsPerRow);
   const DUE = 180,
     PEAK = 65;
   const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -664,14 +668,58 @@
       2,
     );
   }
+  function newCombine(p) {
+    const rows = Array.from({ length: harvestRows }, (_, i) =>
+      p.harvestRows?.includes(i) || (p.harvested && !p.lost && !p.harvestRows) ? cutRow : uncutRow);
+    return { rows, partial: {}, loadSc: 0, trailer: null };
+  }
   function harvestedArea(p) {
+    if (p.combine) {
+      const completed = sum(p.combine.rows, (r) => r.replace(/0/g, "").length);
+      const partial = sum(Object.values(p.combine.partial), (c) => c.taken / c.total);
+      return p.area * (completed + partial) / (harvestRows * cellsPerRow);
+    }
     if (p.harvestRows) return (p.area * p.harvestRows.length) / harvestRows;
     return p.harvested && !p.lost ? p.area : 0;
+  }
+  function combineStatus(p) {
+    const c = p.combine || newCombine(p);
+    return {
+      cells: c.rows.map((row) => Array.from(row, (cell) => cell === "1")),
+      loadSc: c.loadSc, capacitySc: combineCapacity, trailer: c.trailer && { ...c.trailer },
+      cutAreaHa: harvestedArea(p),
+    };
+  }
+  function validCombine(p, day) {
+    const c = p.combine;
+    if (!c || !p.crop || !(p.area > 0) || !Number.isInteger(p.matureDay) || day < p.matureDay ||
+        !Array.isArray(c.rows) || c.rows.length !== harvestRows ||
+        !c.rows.every((r) => typeof r === "string" && r.length === cellsPerRow && !/[^01]/.test(r)) ||
+        !c.partial || typeof c.partial !== "object" || Array.isArray(c.partial) ||
+        !Number.isFinite(c.loadSc) || round(c.loadSc, 3) !== c.loadSc ||
+        c.loadSc < 0 || c.loadSc > combineCapacity || c.loadSc > p.production) return false;
+    if (c.trailer !== null && (!c.trailer || !["norte", "sul"].includes(c.trailer.side) ||
+        !Number.isSafeInteger(c.trailer.readyAt) || c.trailer.readyAt < 0)) return false;
+    for (const [key, progress] of Object.entries(c.partial)) {
+      const i = Number(key);
+      if (String(i) !== key || !Number.isInteger(i) || i < 0 || i >= harvestRows * cellsPerRow ||
+          c.rows[Math.floor(i / cellsPerRow)][i % cellsPerRow] !== "0" || !progress ||
+          !Number.isSafeInteger(progress.taken) || !Number.isSafeInteger(progress.total) ||
+          progress.taken <= 0 || progress.taken >= progress.total) return false;
+    }
+    const full = c.rows.flatMap((r, i) => r === cutRow ? [i] : []);
+    if (p.harvestRows !== undefined && (!Array.isArray(p.harvestRows) || !p.harvestRows.length)) return false;
+    if (JSON.stringify(full) !== JSON.stringify(p.harvestRows || [])) return false;
+    const started = c.rows.some((r) => r !== uncutRow) || Object.keys(c.partial).length > 0;
+    return p.harvested === (p.lost === true || full.length === harvestRows) &&
+      (started || p.lost ? Number.isInteger(p.harvestDay) && p.harvestDay >= p.matureDay && p.harvestDay <= day :
+        p.harvestDay == null && !p.production && !p.stocks);
   }
   function harvestCost(p, targetArea = p.area) {
     return money(money(165 * targetArea) - money(165 * harvestedArea(p)));
   }
   function validHarvestRows(p, day) {
+    if (p.combine !== undefined) return validCombine(p, day);
     if (p.harvestRows === undefined) {
       return p.harvested || (p.harvestDay == null && !p.production && !p.stocks);
     }
@@ -685,11 +733,80 @@
       p.harvested === (p.lost === true || rows.length === harvestRows)
     );
   }
+  function readyToCut(s, p) {
+    check(p.crop && !p.harvested && p.matureDay !== null && s.day >= p.matureDay,
+      "O talhão ainda não está pronto para colheita.");
+  }
+  // Atribui milésimos inteiros por posição. A fração de um trecho interrompido
+  // pelo graneleiro cheio conserva sua produtividade mesmo se a data mudar.
+  function takeCell(p, row, cell, rate, spaceMillisacks) {
+    const c = p.combine, index = row * cellsPerRow + cell;
+    const boundary = (i) => Math.round(p.area * rate * i * 1000 / (harvestRows * cellsPerRow));
+    const progress = c.partial[index] || { taken: 0, total: boundary(index + 1) - boundary(index) };
+    const take = Math.min(spaceMillisacks, progress.total - progress.taken);
+    progress.taken += take;
+    if (progress.taken === progress.total) {
+      delete c.partial[index];
+      c.rows[row] = c.rows[row].slice(0, cell) + "1" + c.rows[row].slice(cell + 1);
+    } else c.partial[index] = progress;
+    return take;
+  }
+  function finishCut(s, p, units, areaBefore, cabin) {
+    const areaAfter = harvestedArea(p);
+    const charge = money(money(165 * areaAfter) - money(165 * areaBefore));
+    const entry = "Colheita" + (cabin ? " em cabine" : "") + " · " + p.name;
+    const previous = s.ledger.at(-1);
+    spend(s, entry, charge);
+    if (cabin && previous?.day === s.day && previous.label === entry) {
+      const next = s.ledger.pop();
+      previous.amount = money(previous.amount + next.amount);
+      previous.expense = money(previous.expense + next.expense);
+    }
+    p.harvestDay ??= s.day;
+    p.production = round(p.production + units, 3);
+    p.yieldSc = round(p.production / areaAfter);
+    const rows = p.combine.rows.flatMap((r, i) => r === cutRow ? [i] : []);
+    if (rows.length) p.harvestRows = rows;
+    if (rows.length === harvestRows) {
+      p.harvested = true;
+      p.phase = "Colhido";
+      p.soilChange += p.operation === "direta" ? 0.012 : -0.025;
+    }
+  }
+  function cutInCabin(s, p, row, first, last = first) {
+    readyToCut(s, p);
+    check(marketStorage.enabled(s), "A cabine exige a edição atual da safra.");
+    check(Number.isInteger(row) && row >= 0 && row < harvestRows &&
+      [first, last].every((cell) => Number.isInteger(cell) && cell >= 0 && cell < cellsPerRow), "Trecho de colheita inválido.");
+    const c = p.combine ||= newCombine(p), areaBefore = harvestedArea(p);
+    const rate = yieldFor({ ...p, harvestDay: s.day });
+    let load = Math.round(c.loadSc * 1000);
+    const initialLoad = load, step = first <= last ? 1 : -1;
+    for (let cell = first; ; cell += step) {
+      check(c.rows[row][cell] === "0", "Este trecho já foi colhido.");
+      check(load < combineCapacity * 1000, "Graneleiro cheio. Descarregue na carreta antes de colher.");
+      load += takeCell(p, row, cell, rate, combineCapacity * 1000 - load);
+      if (cell === last) break;
+    }
+    c.loadSc = load / 1000;
+    finishCut(s, p, (load - initialLoad) / 1000, areaBefore, true);
+  }
+  function finishWithCrew(s, p, rows) {
+    const before = harvestedArea(p), rate = yieldFor({ ...p, harvestDay: s.day });
+    let units = 0;
+    for (const row of rows) {
+      for (let cell = 0; cell < cellsPerRow; cell++) {
+        if (p.combine.rows[row][cell] === "0") units += takeCell(p, row, cell, rate, Infinity);
+      }
+    }
+    units /= 1000;
+    marketStorage.receiveHarvest(s, p, units);
+    finishCut(s, p, units, before, false);
+    return { label: "A equipe colheu " + units.toLocaleString("pt-BR") + " sc no " + p.name + ".",
+      detail: { id: p.id, yieldSc: rate, kg: round(units * 60), stress: round(p.stress, 3) } };
+  }
   function harvestCrop(s, p, row, manual) {
-    check(
-      p.crop && !p.harvested && p.matureDay !== null && s.day >= p.matureDay,
-      "O talhão ainda não está pronto para colheita.",
-    );
+    readyToCut(s, p);
     const previousRows = p.harvestRows || [];
     if (manual) {
       check(Number.isInteger(row) && row >= 0 && row < harvestRows, "Faixa de colheita inválida.");
@@ -697,6 +814,7 @@
     }
     const rows = manual ? [row] : Array.from({ length: harvestRows }, (_, i) => i)
       .filter((index) => !previousRows.includes(index));
+    if (p.combine) return finishWithCrew(s, p, rows);
     const cutArea = (p.area * rows.length) / harvestRows;
     const coveredArea = (p.area * (previousRows.length + rows.length)) / harvestRows;
     const charge = harvestCost(p, coveredArea);
@@ -741,7 +859,7 @@
   function refresh(s) {
     if (!["season", "harvest", "accounts"].includes(s.stage)) return;
     const crops = s.plots.filter((p) => p.crop);
-    if (crops.every((p) => p.harvested && p.stocks === 0)) s.stage = "accounts";
+    if (crops.every((p) => p.harvested && p.stocks === 0 && !p.combine?.loadSc)) s.stage = "accounts";
     else if (crops.some((p) => p.phase === "Maduro" || p.harvested)) s.stage = "harvest";
     else s.stage = "season";
   }
@@ -1405,6 +1523,36 @@
         label = "Implantou cobertura no " + p.name + " para proteger o solo.";
         break;
       }
+      case "cutCell": {
+        const p = plotBy(s, pId);
+        cutInCabin(s, p, a.row, a.cell, a.endCell);
+        label = "Colheu na faixa " + (a.row + 1) + " do " + p.name + ".";
+        break;
+      }
+      case "callTrailer": {
+        const p = plotBy(s, pId);
+        check(marketStorage.enabled(s) && p.crop && p.matureDay !== null && s.day >= p.matureDay &&
+          (!p.harvested || p.combine?.loadSc > 0), "A carreta atende talhões em colheita ou com carga na máquina.");
+        check(["sul", "norte"].includes(a.side), "Escolha a cabeceira sul ou norte.");
+        check(Number.isSafeInteger(a.now) && a.now >= 0 && Number.isSafeInteger(a.now + trailerTravelMs), "Horário de chamada inválido.");
+        const c = p.combine ||= newCombine(p);
+        if (c.trailer?.side === a.side) return s;
+        for (const other of s.plots) if (other !== p && other.combine) other.combine.trailer = null;
+        c.trailer = { side: a.side, readyAt: a.now + trailerTravelMs };
+        label = "Chamou a carreta na cabeceira " + a.side + " do " + p.name + ".";
+        break;
+      }
+      case "unloadTrailer": {
+        const p = plotBy(s, pId), c = p.combine;
+        check(c?.loadSc > 0, "O graneleiro está vazio.");
+        check(c.trailer && c.trailer.side === a.side, "Encontre a carreta na cabeceira escolhida.");
+        check(Number.isSafeInteger(a.now) && a.now >= c.trailer.readyAt, "A carreta ainda está a caminho.");
+        check(Number.isFinite(a.speedKmh) && Math.abs(a.speedKmh) <= 1, "Pare a colheitadeira para descarregar.");
+        marketStorage.receiveHarvest(s, p, c.loadSc);
+        label = "Descarregou " + c.loadSc.toLocaleString("pt-BR") + " sc na carreta na cabeceira " + a.side + ".";
+        c.loadSc = 0;
+        break;
+      }
       case "harvestRow":
       case "harvest": {
         const p = plotBy(s, pId);
@@ -1486,7 +1634,7 @@
         p.lost = true;
         p.harvestDay ??= s.day;
         p.phase = "Perdido";
-        label = p.harvestRows?.length
+        label = harvestedArea(p) > 0
           ? "Reconheceu a perda das faixas restantes no " + p.name + ". A produção já colhida foi preservada."
           : "Reconheceu perda integral do " + p.name + ". A área planejada ficou sem colheita nem estoque.";
         break;
@@ -1521,6 +1669,18 @@
         state: checkpoint,
         cashDelta: money(s.cash - checkpoint.cash),
       });
+    // O histórico também reconstrói o contrato alternativo. Agregue uma passada
+    // contínua sem perder a ordem dos trechos ou atravessar chamadas e descargas.
+    const last = s.history.at(-1);
+    if (type === "cutCell" && last?.type === type && last.day === s.day &&
+        last.args.id === pId && last.args.row === a.row) {
+      const first = last.args.cell, end = last.args.endCell ?? first;
+      const step = a.cell - end;
+      if (Math.abs(step) === 1 && (end === first || step === Math.sign(end - first))) {
+        last.args.endCell = a.endCell ?? a.cell;
+        return s;
+      }
+    }
     log(s, type, label, before, { args: clone(a), ...detail });
     if (type === "advance" || type === "advanceHours") rememberFieldWindow(s);
     return s;
@@ -1586,7 +1746,7 @@
         (r) => r.amount,
       ),
     );
-    const stockValue = money(sum(s.plots, (p) => p.stocks * (p.crop ? market(s, p.crop).price : 0)));
+    const stockValue = money(sum(s.plots, (p) => (p.stocks + (p.combine?.loadSc || 0)) * (p.crop ? market(s, p.crop).price : 0)));
     const revenue = money(sum(s.sales, (sale) => sale.gross)),
       freight = money(sum(s.sales, (sale) => sale.freight));
     const operating = money(sum(s.ledger, (e) => e.expense));
@@ -1882,6 +2042,10 @@
           }),
         "Talhões inválidos.",
       );
+      check((marketStorage.enabled(s) || s.plots.every((p) => !p.combine)) &&
+        s.plots.filter((p) => p.combine?.trailer).length <= 1 &&
+        !s.plots.some((p) => p.combine?.loadSc > 0 && ["accounts", "closed"].includes(s.stage)),
+        "Posição da carreta ou carga pendente inválida.");
     }
     check(
       s.ledger.every((e) => Number.isFinite(e.amount) && Number.isFinite(e.expense)) &&
@@ -2069,6 +2233,7 @@
     harvestRows,
     harvestedArea,
     harvestCost,
+    combineStatus,
     report,
     planPrice,
     phenology,

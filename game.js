@@ -399,6 +399,8 @@ function fieldActivity() {
   }
   const ready = s.plots.find((p) => p.phase === "Maduro" && !p.harvested);
   if (ready) return ready.name + " atingiu a maturidade e está pronto para colher.";
+  const loaded = s.plots.find(p => p.combine?.loadSc > 0);
+  if (loaded) return "Há " + sacks(loaded.combine.loadSc) + " para descarregar no " + loaded.name + ".";
   if (!FarmClimate.isHistorical(s.climate) && s.day >= 59 && s.day <= 67)
     return "Alerta regional de calor. Inspecione a reserva e os talhões.";
   return "Avance até a próxima janela de decisão.";
@@ -482,9 +484,10 @@ function seasonPanel(p, f) {
   let nextAction = cta("calendar", "Avançar calendário");
   if (s.stage === "accounts") nextAction = cta("close-review", "Fechar safra");
   if (stock > 0) nextAction = cta("sale", "Vender estoque", p.id);
-  if (ready) {
-    nextAction = cta("harvest", p.harvestRows?.length ? "Continuar colheita" : "Colher talhão", p.id);
-    if (stock > 0) nextAction += btn("sale", "Vender o que já colhi", "truck", "secondary", p.id);
+  if (ready || p.combine?.loadSc > 0) {
+    const label = ready ? (Farm.harvestedArea(p) > 0 ? "Continuar colheita" : "Colher talhão") : "Descarregar graneleiro";
+    nextAction = cta("harvest", label, p.id);
+    if (stock > 0) nextAction += btn("sale", "Vender estoque", "truck", "secondary", p.id);
   }
   if (s.stage === "closed") nextAction = cta("report", "Abrir balanço da safra");
   return `${info("sprout", "Lavoura", p.crop ? `${p.area} ha de ${p.crop} · ${p.phase}` : "Talhão em pousio")}${info("water", "Reserva da propriedade", `${fmt(s.water)} m³ disponíveis`)}${p.crop ? info("calendar", trafficEnabled(p) && (p.workedHa || 0) < p.area ? "Semeadura prevista" : "Semeadura efetiva", Farm.date(p.actualSowDay ?? p.sowDay)) : ""}${f.level === "alto" ? `<div class="callout warm"><b>Alerta regional ${f.trend}</b><br>${esc(f.detail)} ${btn("climate", "Examinar previsão", "", "text-btn")}</div>` : ""}<div class="book-actions">${nextAction}${fieldPolicyButton(p)}${s.stage !== "closed" && p.crop && !p.harvested ? btn("intervene", "Manejo e reserva", "water", "secondary", p.id) : ""}${btn("finance", "Consultar caixa", "wallet", "secondary")}${s.stage !== "closed" && s.day < 120 ? btn("consultants", "Consultar equipe", "person", "text-btn") : ""}${s.stage === "accounts" ? btn("calendar", "Ver calendário", "calendar", "secondary") : ""}</div>`;
