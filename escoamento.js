@@ -25,6 +25,8 @@ function loadingPanel(requestedId) {
   const lot = selected.stocks > 0 ? btn("sale", "Vender o lote do " + esc(selected.name), "truck", "secondary", selected.id) : "";
   const hauling = hasTransport(selected) ? btn("cabine", transportAction(selected), "tractor", "secondary", selected.id) : "";
   const inTrailer = selected.combine?.trailer?.loadSc;
+  const truck = !s.truck && usesCoopTruck(selected) && selected.stocks > 0
+    ? btn("caminhao", "Entrar no caminhão", "truck", "primary", selected.id) : "";
   openModal("escoamento", "Escoamento da safra",
-    `${map}<p class="intro">Talhão ${esc(selected.name)} · ${sacks(selected.stocks)} no silo</p>${inTrailer > 0 ? kv("Em trânsito na carreta", sacks(inTrailer)) : ""}${plan}${stock > 0 ? kv("Estoque total da fazenda", sacks(stock)) : ""}<div class="row">${hauling}${lot}</div><p class="footnote">Tarifas e capacidades simuladas do cenário.</p>`);
+    `${map}<p class="intro">Talhão ${esc(selected.name)} · ${sacks(selected.stocks)} no silo</p>${truckInTransit()}${inTrailer > 0 ? kv("Em trânsito na carreta", sacks(inTrailer)) : ""}${plan}${stock > 0 ? kv("Estoque total da fazenda", sacks(stock)) : ""}<div class="row">${truck}${hauling}${lot}</div><p class="footnote">Tarifas e capacidades simuladas do cenário.</p>`);
 }

@@ -172,6 +172,15 @@ function storyShelf() {
 function storyReview(id) {
   const item = FarmStories.descriptions[id];
   if (!item) return;
+  if (id === "cooperativa") {
+    if (s.truck) {
+      openTruck(s.truck.plotId);
+      return;
+    }
+    openModal("story", esc(item.name),
+      `<p class="intro">${esc(item.location)}</p><p>${esc(item.text)}</p><p class="footnote">Sua campanha fica guardada em Partida enquanto você joga este cenário.</p>${btn("story-go", "Ir para o silo", "truck", "primary", id)}`);
+    return;
+  }
   if (id === "colheita" || id === "silo") {
     openModal("story", esc(item.name),
       `<p class="intro">${esc(item.location)} · 5 ha de soja madura</p><p>${esc(item.text)}</p><p class="footnote">Sua campanha fica guardada em Partida enquanto você joga este cenário.</p>${btn("story-go", id === "silo" ? "Ir para a cabeceira" : "Entrar na cabine", "tractor", "primary", id)}`);
@@ -191,6 +200,7 @@ function startStory(id) {
   save();
   render();
   if (id === "colheita" || id === "silo") openCombine(plotId, true);
+  else if (id === "cooperativa") openTruck(plotId);
   else if (id === "passagem") trafficPanel(plotId);
   else salePanel(plotId);
 }

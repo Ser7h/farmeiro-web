@@ -9,7 +9,7 @@
   const storageError = "O navegador não conseguiu guardar o perfil. Permita que o site salve dados ou abra-o em outro navegador.";
 
   function mostrarEntrada() {
-    resume.hash = ["#colheita", "#silo"].includes(location.hash) ? location.hash : "";
+    resume.hash = ["#colheita", "#silo", "#cooperativa"].includes(location.hash) ? location.hash : "";
     let perfil;
     try {
       perfil = window.FarmeiroPerfil.ler();

@@ -394,6 +394,7 @@ function transportAction(p) {
   return trailer.loadSc > 0 ? "Levar a carreta ao silo" : "Retomar o trator";
 }
 function fieldActivity() {
+  if (s.truck) return "Caminhão com " + sacks(s.truck.loadSc) + " de soja a caminho da cooperativa.";
   const hauling = s.plots.find(hasTransport);
   if (hauling) {
     const load = hauling.combine.trailer.loadSc;
@@ -506,6 +507,7 @@ function seasonPanel(p, f) {
     nextAction = cta("harvest", label, p.id);
     if (stock > 0) nextAction += btn("sale", "Vender estoque", "truck", "secondary", p.id);
   }
+  if (s.truck) nextAction = cta("caminhao", "Retomar o caminhão", s.truck.plotId) + nextAction;
   if (s.stage === "closed") nextAction = cta("report", "Abrir balanço da safra");
   return `${info("sprout", "Lavoura", p.crop ? `${p.area} ha de ${p.crop} · ${p.phase}` : "Talhão em pousio")}${info("water", "Reserva da propriedade", `${fmt(s.water)} m³ disponíveis`)}${p.crop ? info("calendar", trafficEnabled(p) && (p.workedHa || 0) < p.area ? "Semeadura prevista" : "Semeadura efetiva", Farm.date(p.actualSowDay ?? p.sowDay)) : ""}${f.level === "alto" ? `<div class="callout warm"><b>Alerta regional ${f.trend}</b><br>${esc(f.detail)} ${btn("climate", "Examinar previsão", "", "text-btn")}</div>` : ""}<div class="book-actions">${nextAction}${fieldPolicyButton(p)}${s.stage !== "closed" && p.crop && !p.harvested ? btn("intervene", "Manejo e reserva", "water", "secondary", p.id) : ""}${btn("finance", "Consultar caixa", "wallet", "secondary")}${s.stage !== "closed" && s.day < 120 ? btn("consultants", "Consultar equipe", "person", "text-btn") : ""}${s.stage === "accounts" ? btn("calendar", "Ver calendário", "calendar", "secondary") : ""}</div>`;
 }

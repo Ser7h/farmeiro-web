@@ -177,7 +177,7 @@ function startPanel() {
 function calendarPanel() {
   const day = s.day,
     ready = s.plots.filter((p) => p.area && !p.harvested && p.phase === "Maduro");
-  const loaded = s.plots.filter(p => hasTransport(p) || (p.harvested && p.combine?.loadSc > 0))
+  const loaded = truckInTransit() + s.plots.filter(p => hasTransport(p) || (p.harvested && p.combine?.loadSc > 0))
     .map(p => {
       const transport = hasTransport(p);
       const cargo = transport ? sacks(p.combine.trailer.loadSc || 0) + " na carreta" : sacks(p.combine.loadSc) + " no graneleiro";
@@ -302,6 +302,7 @@ function openCombine(id, inicioDoCenario = false) {
     onMoverTrator: (distance, lateral) => operate("moveTractor", { distance, lateral }),
     onDescarregarSilo: speedKmh => operate("unloadSilo", { speedKmh }),
     onEntrarColheitadeira: speedKmh => operate("parkTractor", { speedKmh }),
+    onEntrarCaminhao: usesCoopTruck(plot) ? () => openTruck(id) : undefined,
     onSair() {
       const current = getPlot();
       render();
@@ -321,7 +322,55 @@ const sackNumber = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 3 });
 function sacks(units) {
   return sackNumber.format(units) + " sc";
 }
+function usesCoopTruck(plot) {
+  return FarmMarket.enabled(s) && plot?.crop === "soja";
+}
+function truckInTransit() {
+  if (!s.truck) return "";
+  const field = s.plots.find(p => p.id === s.truck.plotId);
+  return `<div class="callout"><b>Caminhão a caminho da cooperativa</b><p>${sacks(s.truck.loadSc)} de soja do ${esc(field.name)} em trânsito.</p>${btn("caminhao", "Retomar o caminhão", "truck", "primary", field.id)}</div>`;
+}
+function openTruck(id, units, terms = "spot") {
+  const fieldId = s.truck?.plotId || id;
+  const plot = () => s.plots.find(p => p.id === fieldId);
+  if (!usesCoopTruck(plot()) || (!s.truck && !plot().stocks)) {
+    failure("Entregue soja no silo antes de carregar o caminhão.");
+    return;
+  }
+  const route = Farm.truckRoute;
+  const quantity = s.truck?.loadSc ?? units ?? Math.min(route.capacitySc, plot().stocks);
+  let receipt;
+  function status() {
+    const field = plot(), truck = s.truck;
+    const offer = receipt || FarmMarket.truckQuote(s, field, quantity, terms);
+    return {
+      cultura: field.crop, quantidadeSc: offer.units, cargaSc: truck?.loadSc || 0,
+      capacidadeSc: route.capacitySc, estoqueSc: field.stocks, caixa: s.cash, termos: offer.terms,
+      precoSc: offer.price, valorLiquido: offer.net, custoTransporte: offer.freight, tarifa: offer.storageFee,
+      diaPagamento: Farm.date(offer.payDay), entregue: Boolean(receipt),
+      distancia: receipt ? route.length : truck?.distance || 0, lateral: truck?.lateral || 0, percursoM: route.length,
+    };
+  }
+  function operate(type, args) {
+    s = Farm.act(s, type, args);
+    if (type === "deliverTruck") receipt = s.sales.at(-1);
+    save();
+    return status();
+  }
+  dismiss();
+  window.FarmeiroCaminhao.abrir({
+    nome: plot().name, status,
+    onCarregar: () => operate("loadTruck", { id: fieldId, units: quantity, terms }),
+    onMover: (distance, lateral) => operate("moveTruck", { distance, lateral }),
+    onEntregar: speedKmh => operate("deliverTruck", { speedKmh }),
+    onSair() {
+      render();
+      if (!s.truck) salePanel(fieldId);
+    },
+  });
+}
 function saleTerms(plot, market, args, warehouseEnabled) {
+  const truck = usesCoopTruck(plot);
   return ["spot", "term"]
     .map((terms) => {
       const atTerm = terms === "term";
@@ -331,7 +380,9 @@ function saleTerms(plot, market, args, warehouseEnabled) {
       if (warehouseEnabled && payDay > 360) {
         return `<div class="mini-card"><h4>${title}</h4><p>O prazo ultrapassa a data final da campanha. A oferta à vista continua disponível.</p></div>`;
       }
-      const sale = warehouseEnabled
+      const sale = truck
+        ? FarmMarket.truckQuote(s, plot, args.units, terms)
+        : warehouseEnabled
         ? FarmMarket.quote(s, plot, { ...args, terms }, market)
         : {
             units: plot.stocks,
@@ -340,7 +391,10 @@ function saleTerms(plot, market, args, warehouseEnabled) {
             gross: Math.round(price * plot.stocks * 100) / 100,
           };
       const net = sale.net ?? sale.gross - sale.freight;
-      return `<div class="mini-card"><h4>${title}</h4>${kv("Preço por saca", brl(price))}${kv("Receita bruta", brl(sale.gross))}${sale.bayUnits ? kv("Via ponto de carga", sacks(sale.bayUnits)) : ""}${kv("Frete total", brl(sale.freight))}${sale.storageFee ? kv("Tarifa retida", brl(sale.storageFee)) : ""}${kv("Valor líquido", brl(net))}${kv("Pagamento", Farm.date(payDay))}${btn("sell", atTerm ? "Vender e criar recebível" : "Vender e receber", "truck", "primary", plot.id + "-" + terms)}</div>`;
+      const button = truck
+        ? btn(atTerm ? "caminhao-prazo" : "caminhao", atTerm ? "Levar com venda a prazo" : "Entrar no caminhão", "truck", atTerm ? "secondary" : "primary", plot.id)
+        : btn("sell", atTerm ? "Vender e criar recebível" : "Vender e receber", "truck", "primary", plot.id + "-" + terms);
+      return `<div class="mini-card"><h4>${title}</h4>${kv("Preço por saca", brl(price))}${kv("Receita bruta", brl(sale.gross))}${sale.bayUnits ? kv("Via ponto de carga", sacks(sale.bayUnits)) : ""}${kv(truck ? "Custo do transporte" : "Frete total", brl(sale.freight))}${sale.storageFee ? kv("Tarifa retida", brl(sale.storageFee)) : ""}${kv("Valor líquido", brl(net))}${kv("Pagamento", truck ? (atTerm ? market.termDays + " dias após a entrega" : "Na entrega à cooperativa") : Farm.date(payDay))}${button}</div>`;
     })
     .join("");
 }
@@ -364,6 +418,15 @@ function salePanel(id) {
   const plot = s.plots.find((p) => p.id === id),
     market = Farm.market(s, plot.crop);
   const enabled = FarmMarket.enabled(s);
+  const truck = usesCoopTruck(plot);
+  const last = s.sales.findLast(v => v.id === id && v.transport === "truck");
+  const receipt = last ? `<div class="callout"><b>Última entrega na cooperativa</b><p>${sacks(last.units)} · ${brl(last.net)} líquidos · ${last.terms === "spot" ? "recebidos no caixa" : "vencimento em " + Farm.date(last.payDay)}.</p></div>` : "";
+  if (!plot.stocks || (truck && s.truck)) {
+    openModal("sale", "Silo do " + plot.name,
+      `${kv(truck ? "Soja no silo" : "Grãos no silo", sacks(plot.stocks))}${truckInTransit()}${receipt}${kv("Caixa disponível", brl(s.cash))}<div class="row">${hasFieldOperation(plot) ? btn("cabine", hasTransport(plot) ? transportAction(plot) : "Retomar a colheita", "tractor", "secondary", id) : ""}${btn("finance", "Ver extrato", "wallet", "secondary")}</div>`);
+    return;
+  }
+  const maxLot = truck ? Math.min(plot.stocks, Farm.truckRoute.capacitySc) : plot.stocks;
   const currentPrice = market.price;
   const nextDebt = s.debts.filter((d) => d.balance > 0).sort((a, b) => a.due - b.due)[0];
   let obligation = nextDebt
@@ -375,11 +438,11 @@ function salePanel(id) {
     const action =
       coverage.remainingGap > 0
         ? `Mesmo vendendo todo este talhão à vista, ainda faltariam ${brl(coverage.remainingGap)}.`
-        : `A venda à vista de ${sacks(coverage.units)} cobre essa diferença, após frete e tarifa. <button type="button" class="text-btn" id="apply-coverage">Selecionar essa quantidade</button>`;
+        : `A venda à vista de ${sacks(coverage.units)} cobre essa diferença, após frete e tarifa. ${truck && coverage.units > maxLot ? "São necessárias várias viagens. " : ""}<button type="button" class="text-btn" id="apply-coverage">${truck && coverage.units > maxLot ? "Selecionar a primeira carga" : "Selecionar essa quantidade"}</button>`;
     obligation = `<div class="callout warm"><b>Compromisso em ${Farm.date(gap.day)}</b><br>Considerando o caixa e os recebíveis contratados, faltariam ${brl(-gap.balance)}. ${action}</div>`;
   }
   const chooser = enabled
-    ? `<label class="form-label">Quantidade a vender (sc de 60 kg)<input id="sale-quantity" type="number" min="0.001" max="${plot.stocks}" step="0.001" required value="${plot.stocks}"></label><div class="row" id="sale-shares">${[25, 50, 100].map((value) => `<button class="secondary" type="button" data-share="${value}">${value}% do estoque</button>`).join("")}</div><p id="sale-balance" aria-live="polite" class="footnote"></p>`
+    ? `<label class="form-label">${truck ? "Sacas a carregar nesta viagem" : "Quantidade a vender"} (sc de 60 kg)<input id="sale-quantity" type="number" min="0.001" max="${maxLot}" step="0.001" required value="${maxLot}"></label><div class="row" id="sale-shares">${[25, 50, 100].map((value) => `<button class="secondary" type="button" data-share="${value}">${value}% ${truck ? "da carga disponível" : "do estoque"}</button>`).join("")}</div><p id="sale-balance" aria-live="polite" class="footnote"></p>`
     : "";
   const fieldLoads = [];
   if (plot.combine?.loadSc > 0) fieldLoads.push(sacks(plot.combine.loadSc) + " no graneleiro");
@@ -389,7 +452,7 @@ function salePanel(id) {
   openModal(
     "sale",
     `Venda do ${plot.name}`,
-    `<p class="intro">${sacks(plot.stocks)} de 60 kg de ${plot.crop} em estoque. Oferta do comprador em ${Farm.date(s.day)}.</p>${inCombine}${kv("Preço à vista hoje", brl(currentPrice) + "/sc")}${kv("Frete direto", brl(market.freight) + "/sc")}${enabled ? btn("escoamento", s.loadingBay ? "Ver ponto de carga" : "Planejar ponto de carga", "truck", "secondary", id) : ""}${obligation}${chooser}<div id="sale-offers">${saleTerms(plot, market, {}, enabled)}</div>${enabled ? storagePanel(plot, market) : ""}`,
+    `<p class="intro">${sacks(plot.stocks)} de 60 kg de ${plot.crop} em estoque. Oferta do comprador em ${Farm.date(s.day)}.</p>${truck ? `<p>Seu caminhão leva até ${sacks(Farm.truckRoute.capacitySc)} por viagem. A cooperativa pesa a carga e aplica a cotação do dia da entrega.</p>` : ""}${inCombine}${kv("Preço à vista hoje", brl(currentPrice) + "/sc")}${kv("Frete direto", brl(market.freight) + "/sc")}${enabled ? btn("escoamento", s.loadingBay ? "Ver ponto de carga" : "Planejar ponto de carga", "truck", "secondary", id) : ""}${obligation}${chooser}<div id="sale-offers">${saleTerms(plot, market, {}, enabled)}</div>${receipt}${enabled ? storagePanel(plot, market) : ""}`,
   );
   if (!enabled) return;
   const input = document.getElementById("sale-quantity");
@@ -399,7 +462,7 @@ function salePanel(id) {
     try {
       const args = saleQuantityArgs();
       preview.innerHTML = saleTerms(plot, market, args, true);
-      balance.textContent = "Ficam no depósito após esta venda: " + sacks(plot.stocks - args.units) + ".";
+      balance.textContent = "Ficam no silo: " + sacks(plot.stocks - args.units) + ".";
     } catch (error) {
       preview.innerHTML = "";
       balance.textContent = error.message;
@@ -408,14 +471,14 @@ function salePanel(id) {
   document.getElementById("sale-shares").onclick = (event) => {
     const button = event.target.closest("button[data-share]");
     if (!button) return;
-    const available = Math.round(plot.stocks * 1000);
+    const available = Math.round(maxLot * 1000);
     input.value = Math.max(1, Math.round((available * Number(button.dataset.share)) / 100)) / 1000;
     refreshOffers();
   };
   const coverageButton = document.getElementById("apply-coverage");
   if (coverageButton)
     coverageButton.onclick = () => {
-      input.value = coverage.units;
+      input.value = Math.min(maxLot, coverage.units);
       refreshOffers();
     };
   input.oninput = refreshOffers;

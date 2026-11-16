@@ -890,7 +890,7 @@
   function refresh(s) {
     if (!["season", "harvest", "accounts"].includes(s.stage)) return;
     const crops = s.plots.filter((p) => p.crop);
-    if (crops.every((p) => p.harvested && p.stocks === 0 && !p.combine?.loadSc && !p.combine?.trailer?.loadSc)) s.stage = "accounts";
+    if (!s.truck && crops.every((p) => p.harvested && p.stocks === 0 && !p.combine?.loadSc && !p.combine?.trailer?.loadSc)) s.stage = "accounts";
     else if (crops.some((p) => p.phase === "Maduro" || p.harvested)) s.stage = "harvest";
     else s.stage = "season";
   }
@@ -1101,10 +1101,19 @@
       ...s.receivables.filter((r) => !r.paid).map((r) => r.day),
       ...s.debts.filter((d) => d.balance > 0).map((d) => d.due),
     ].filter((d) => Number.isInteger(d) && d > start);
-    const until = Math.min(360, start + count, ...stops);
+    const lastDeliveryDay = s.truck?.terms === "term" ? 360 - market(s, "soja").termDays : 360;
+    check(start < lastDeliveryDay, "Entregue a carga a prazo na cooperativa para continuar o calendário.");
+    const until = Math.min(lastDeliveryDay, start + count, ...stops);
     while (s.day < until || s.hour === 0) {
       if (dayStep(s)) break;
     }
+  }
+  function settleSale(s, plot, sale, label) {
+    if (sale.terms === "spot") booking(s, label, sale.net, "sale");
+    else s.receivables.push({
+      id: sale.saleId, saleId: sale.saleId, plotId: plot.id, label: plot.name,
+      day: sale.payDay, amount: sale.net, paid: false,
+    });
   }
   function apply(s, type, a, replay) {
     const before = forecast(s),
@@ -1121,6 +1130,7 @@
       "defer",
       "preserve",
       "sell",
+      "loadTruck",
       "fieldPolicy",
       "buildLoadingBay",
     ].includes(type)
@@ -1663,6 +1673,53 @@
         ({ label, detail } = harvestCrop(s, p, a.row, type === "harvestRow"));
         break;
       }
+      case "loadTruck": {
+        check(!s.truck, "O caminhão já tem uma carga para entregar na cooperativa.");
+        const p = plotBy(s, pId);
+        const quote = marketStorage.truckQuote(s, p, a.units, a.terms);
+        const { units, terms, freight, storageFee, loadingDay, bayUnits } = quote;
+        p.stocks = (Math.round(p.stocks * 1000) - Math.round(units * 1000)) / 1000;
+        const dispatch = { terms, storageFee, freight, loadingDay };
+        if (bayUnits !== undefined) dispatch.bayUnits = bayUnits;
+        s.truck = { plotId: p.id, loadSc: units, distance: 0, lateral: 0, ...dispatch };
+        detail = { id: p.id, crop: p.crop, units, ...dispatch };
+        label = "Carregou " + units.toLocaleString("pt-BR") + " sc de soja no caminhão para a cooperativa.";
+        break;
+      }
+      case "moveTruck": {
+        const t = s.truck;
+        check(t, "Carregue o caminhão no silo antes de dirigir.");
+        check(Number.isFinite(a.distance) && a.distance >= 0 && a.distance <= marketStorage.truckRoute.length &&
+          Number.isFinite(a.lateral) && Math.abs(a.lateral) <= 2, "Posição fora da estrada da cooperativa.");
+        check(replay || Math.abs(a.distance - t.distance) <= 50, "Percorra a estrada do silo até a cooperativa.");
+        if (a.distance === t.distance && a.lateral === t.lateral) return s;
+        t.distance = a.distance;
+        t.lateral = a.lateral;
+        const last = s.history.at(-1);
+        if (last?.type === type && last.day === s.day) {
+          last.args = clone(a);
+          return s;
+        }
+        label = "Conduziu o caminhão pela estrada da cooperativa.";
+        break;
+      }
+      case "deliverTruck": {
+        const t = s.truck;
+        check(t, "O caminhão está sem carga para entregar.");
+        check(marketStorage.truckRoute.length - t.distance <= 3 && Math.abs(t.lateral) <= 1.5,
+          "Alinhe o caminhão sobre a moega da cooperativa.");
+        check(Number.isFinite(a.speedKmh) && Math.abs(a.speedKmh) <= 1, "Pare o caminhão para entregar a soja.");
+        const p = plotBy(s, t.plotId);
+        const sale = marketStorage.truckQuote(s, p);
+        if (p.warehouse) p.warehouse.retainedCents += Math.round(sale.storageFee * 100);
+        s.sales.push(sale);
+        settleSale(s, p, sale, "Entrega na cooperativa · " + p.name);
+        detail = { saleId: sale.saleId, plotId: p.id, units: sale.units, freight: sale.freight };
+        if (sale.bayUnits !== undefined) detail.bayUnits = sale.bayUnits;
+        delete s.truck;
+        label = "Entregou " + sale.units.toLocaleString("pt-BR") + " sc de soja na cooperativa.";
+        break;
+      }
       case "sell": {
         const p = plotBy(s, pId);
         check(p.stocks > 0, "O talhão não tem estoque colhido para vender.");
@@ -1671,17 +1728,7 @@
           term = a.terms === "term";
         if (marketStorage.enabled(s)) {
           const sale = marketStorage.sellLot(s, p, a, marketNow);
-          if (term)
-            s.receivables.push({
-              id: sale.saleId,
-              saleId: sale.saleId,
-              plotId: p.id,
-              label: p.name,
-              day: sale.payDay,
-              amount: sale.net,
-              paid: false,
-            });
-          else booking(s, "Venda à vista · " + p.name, sale.net, "sale");
+          settleSale(s, p, sale, "Venda à vista · " + p.name);
           label =
             "Vendeu " +
             sale.units.toLocaleString("pt-BR") +
@@ -1850,7 +1897,11 @@
         (r) => r.amount,
       ),
     );
-    const stockValue = money(sum(s.plots, (p) => (p.stocks + (p.combine?.loadSc || 0) + (p.combine?.trailer?.loadSc || 0)) * (p.crop ? market(s, p.crop).price : 0)));
+    const stockValue = money(sum(s.plots, (p) => {
+      const grain = p.stocks + (p.combine?.loadSc || 0) + (p.combine?.trailer?.loadSc || 0) +
+        (s.truck?.plotId === p.id ? s.truck.loadSc : 0);
+      return grain * (p.crop ? market(s, p.crop).price : 0);
+    }));
     const revenue = money(sum(s.sales, (sale) => sale.gross)),
       freight = money(sum(s.sales, (sale) => sale.freight));
     const operating = money(sum(s.ledger, (e) => e.expense));
@@ -2339,6 +2390,7 @@
     harvestCost,
     combineStatus,
     tractorRoute,
+    truckRoute: marketStorage.truckRoute,
     silo,
     report,
     planPrice,

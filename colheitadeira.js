@@ -43,6 +43,7 @@
             <button type="button" data-op="alinhar">Alinhar na cabeceira</button>
             <button type="button" data-op="entrar-trator">Entrar no trator</button>
             <button type="button" data-op="descarregar-silo" hidden>Descarregar no silo</button>
+            <button type="button" data-op="entrar-caminhao" hidden>Entrar no caminhão</button>
             <button type="button" data-op="entrar-colheitadeira" hidden>Entrar na colheitadeira</button>
           </div>
           <div class="cab-pedais" aria-label="Direção e pedais">
@@ -215,6 +216,7 @@
       botoes["entrar-trator"].hidden = emTrator;
       botoes.plataforma.hidden = botoes.alinhar.hidden = emTrator;
       botoes["entrar-colheitadeira"].hidden = botoes["descarregar-silo"].hidden = !emTrator;
+      botoes["entrar-caminhao"].hidden = true;
       leds["carga-carreta"].textContent = formatar(cargaCarreta(), 2) + " sc";
       leds.estoque.textContent = formatar(estado.estoqueSc, 2) + " sc";
       leds.graneleiro.textContent = formatar(estado.loadSc, 2) + " / " + formatar(estado.capacitySc, 2) + " sc";
@@ -251,6 +253,7 @@
         if (!naMoega && restante <= 3 && !trator.voltar) leds.aviso.textContent = "Use ← ou → em baixa velocidade para centralizar a carreta sobre a grade.";
         botoes["entrar-colheitadeira"].disabled = !naOrigem || !parado;
         botoes["descarregar-silo"].disabled = !naMoega || !parado || !cargaCarreta();
+        botoes["entrar-caminhao"].hidden = !opcoes.onEntrarCaminhao || !naMoega || !parado || cargaCarreta() > 0 || estado.estoqueSc <= 0;
         botoes["descarregar-silo"].classList.toggle("cab-comando-ativo", !botoes["descarregar-silo"].disabled);
         botoes["entrar-colheitadeira"].classList.toggle("cab-comando-ativo", trator.voltar && !botoes["entrar-colheitadeira"].disabled);
         leds.teclas.textContent = "W ou ↑ acelera · S ou ↓ freia e dá ré · A/D ou ←/→ ajustam a direção na estrada · U descarrega na moega · E entra na colheitadeira.";
@@ -475,7 +478,7 @@
       if (agora - ultimoPainel > 140) { atualizarPainel(); ultimoPainel = agora; }
       quadro = requestAnimationFrame(animar);
     }
-    function fechar() {
+    function fechar(destino) {
       if (encerrada) return;
       guardarOperacao();
       encerrada = true;
@@ -487,7 +490,8 @@
       dialog.remove();
       fecharAtual = undefined;
       if (antes?.isConnected) antes.focus({ preventScroll: true });
-      opcoes.onSair?.();
+      if (destino === "caminhao") opcoes.onEntrarCaminhao();
+      else opcoes.onSair?.();
     }
     listen(botoes.sair, "click", fechar);
     function comando(botao, executar) {
@@ -502,6 +506,9 @@
     comando(botoes.descarregar, descarregar);
     comando(botoes["entrar-trator"], entrarTrator);
     comando(botoes["descarregar-silo"], descarregarSilo);
+    listen(botoes["entrar-caminhao"], "click", () => {
+      if (!botoes["entrar-caminhao"].hidden) fechar("caminhao");
+    });
     comando(botoes["entrar-colheitadeira"], entrarColheitadeira);
     listen(dialog, "cancel", (e) => { e.preventDefault(); fechar(); });
     listen(window, "keydown", (e) => {

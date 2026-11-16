@@ -1,0 +1,71 @@
+.caminhao-farmeiro {
+  --cam-fundo: #162c28;
+  --cam-texto: #f4f2df;
+  --cam-claro: #dce9a9;
+  inset: 0; margin: 0; padding: 0; width: 100%; height: 100dvh;
+  max-width: none; max-height: none; border: 0; border-radius: 0;
+  background: var(--cam-fundo); color: var(--cam-texto); color-scheme: dark;
+  overflow: auto; overscroll-behavior: contain;
+  font: 15px/1.3 var(--sans,"Segoe UI",sans-serif); font-variant-numeric: tabular-nums;
+}
+.caminhao-farmeiro::backdrop {background: #10201d;}
+.caminhao-farmeiro * {box-sizing: border-box;}
+.caminhao-farmeiro [hidden] {display:none !important;}
+.caminhao-farmeiro button {
+  min-height: 43px; margin:0; padding:8px 13px; border:1px solid #809388; border-radius:5px;
+  background:#244039; color:var(--cam-texto); font:650 14px/1.2 var(--sans,"Segoe UI",sans-serif);
+  cursor:pointer; touch-action:manipulation;
+}
+.caminhao-farmeiro button:focus-visible {outline:3px solid #f2c66e; outline-offset:2px;}
+.caminhao-farmeiro button:disabled {opacity:.49; cursor:default;}
+.caminhao-farmeiro button:active:not(:disabled) {background:#415e4d; transform:none;}
+.cam-estrutura {height:100%; min-height:415px; display:grid; grid-template-rows:auto minmax(150px,1fr) auto;}
+.cam-topo, .cam-comandos {
+  position:static; background:var(--cam-fundo); color:var(--cam-texto);
+  padding:10px max(17px,env(safe-area-inset-left)); display:flex; align-items:center; gap:16px;
+}
+.cam-topo {border-bottom:1px solid #819284; justify-content:space-between;}
+.cam-topo div {display:flex; align-items:baseline; gap:13px;}
+.cam-topo span,.cam-comandos small,.cam-roteiro span {color:#d2ddc3;}
+.cam-topo span {font:650 11px/1.2 var(--sans,sans-serif); letter-spacing:.10em; text-transform:uppercase;}
+.caminhao-farmeiro .cam-topo h2 {margin:0; color:#fff9df; font:400 clamp(20px,2.5vw,34px)/1.05 var(--serif,Georgia,serif);}
+.cam-vista {position:relative; overflow:hidden; isolation:isolate; background:#9ca87f;}
+.cam-cena-2d, .cam-cena-3d {display:block; width:100%; height:100%; position:absolute; inset:0;}
+.caminhao-farmeiro[data-vista="3d"] .cam-cena-2d {visibility:hidden;}
+.cam-instrucao,.cam-roteiro {
+  position:absolute; top:3.8%; background:#18312bf0; color:var(--cam-texto); pointer-events:none;
+}
+.cam-instrucao {left:2.4%; max-width:min(53%,340px); display:grid; gap:4px; padding:10px 14px; border-left:3px solid #eac776; border-radius:0 4px 4px 0;}
+.cam-instrucao strong {font-size:clamp(14px,1.5vw,21px);}
+.cam-instrucao span {font-size:clamp(12px,1.1vw,15px); color:#e0e5d2;}
+.cam-instrucao .cam-oferta {font-size:clamp(11px,.95vw,13px); color:#ebdcad;}
+.cam-roteiro {right:2.4%; width:clamp(104px,12vw,148px); padding:7px 9px; border-radius:4px; border:1px solid #adbaa1; display:grid; gap:3px; font-size:11px;}
+.cam-mapa {width:100%; height:clamp(35px,8vh,73px);}
+.cam-roteiro b {font-size:11px; line-height:1.12;}
+.cam-comandos {border-top:1px solid #849481; flex-wrap:wrap; justify-content:space-between; gap:6px 18px; padding-bottom:max(8px,env(safe-area-inset-bottom));}
+.cam-instrumentos,.cam-botoes,.cam-pedais {display:flex; gap:9px; align-items:center;}
+.cam-instrumentos {flex-wrap:wrap; gap:5px clamp(12px,2vw,30px);}
+.cam-instrumentos div {display:grid; gap:2px;}
+.cam-instrumentos small {font-size:11px;}
+.cam-instrumentos b {font-size:clamp(14px,1.5vw,20px); white-space:nowrap;}
+.cam-botoes {flex-wrap:wrap; gap:7px 12px;}
+.caminhao-farmeiro .cam-principal:not(:disabled) {background:var(--cam-claro); color:#193527; border-color:var(--cam-claro);}
+.cam-pedais {gap:5px;}
+.cam-pedais button {min-width:43px; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;}
+.cam-teclas {font-size:11px; color:#c8d2bc; width:100%;}
+@media (max-width:650px) {
+  .cam-topo,.cam-comandos {padding:7px 10px;}
+  .cam-topo div {display:grid; gap:2px;} .cam-topo span {font-size:9px;}
+  .cam-instrucao {left:2%; padding:6px 8px;} .cam-roteiro {right:2%;padding:5px;}
+  .cam-instrumentos {width:100%; gap:5px 13px;} .cam-instrumentos small {font-size:10px;} .cam-instrumentos b {font-size:13px;}
+  .cam-botoes {width:100%; justify-content:space-between; gap:4px;}
+  .cam-botoes button {font-size:12px; min-height:44px; padding:5px 7px;} .cam-pedais {gap:3px;}
+  .cam-teclas {display:none;}
+}
+@media (max-height:520px) and (min-width:540px) {
+  .cam-estrutura {min-height:300px;}
+  .cam-topo,.cam-comandos {padding:4px 10px;} .cam-topo button {min-height:32px;}
+  .cam-comandos {gap:3px 12px;}
+  .cam-instrumentos {gap:9px;} .cam-instrumentos b {font-size:13px;}
+  .cam-botoes button {min-height:36px; font-size:12px;} .cam-teclas {display:none;}
+}

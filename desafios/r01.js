@@ -15,6 +15,12 @@
       text: "A primeira passada já está na carreta, ao lado da colheitadeira. Entre no trator, siga pela estrada e pare sobre a moega para entregar a soja. Depois você pode voltar à lavoura.",
       icon: "truck",
     },
+    cooperativa: {
+      name: "Levar a soja à cooperativa",
+      location: "Silo da Santa Helena",
+      text: "A soja do Alto já está no silo. Carregue o caminhão, dirija pela estrada e pare na recepção da cooperativa. Entregue a carga para receber o valor da venda.",
+      icon: "truck",
+    },
     passagem: {
       name: "A máquina entra?",
       location: "Grota da Boa Vista",
@@ -65,6 +71,7 @@
           return F.challenge(state);
         }
         go("harvest", { id: plotId });
+        if (key === "cooperativa") return F.challenge(state);
         if (!pass) point = state.checkpoints.length;
         go("sell", { id: plotId, terms: "spot" });
       }
